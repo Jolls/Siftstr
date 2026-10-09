@@ -199,12 +199,32 @@ func (s *server) page(sess *session, active, title string) ui.Page {
 	return ui.Page{Title: title, Active: active, User: &ui.User{ID: sess.User.ID, Name: sess.User.Username}, CSRF: sess.CSRF}
 }
 
-// itemsPage renders an item list. Items arrive with ingest and the triage
-// service; until then every list is empty.
-func (s *server) itemsPage(active, heading, empty string) func(http.ResponseWriter, *http.Request, *session) {
-	return func(w http.ResponseWriter, _ *http.Request, sess *session) {
-		p := s.page(sess, active, heading)
+// badges are the words an actioned card shows. gestures.js has the same table.
+var badges = map[string]string{"archived": "archived", "kept": "kept", "pending_deep": "promoted"}
+
+// itemsPage renders one list of cards: today's, or the carried-over backlog.
+func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter, *http.Request, *session) {
+	return func(w http.ResponseWriter, req *http.Request, sess *session) {
+		ctx := req.Context()
+		today, err := s.Runs.Today(ctx, sess.User.ID)
+		var cards []triage.Card
+		if err == nil {
+			cards, err = s.Triage.Cards(ctx, sess.User.ID, list, today)
+		}
+		if err != nil {
+			serverError(w)
+			return
+		}
+		p := s.page(sess, list, heading)
 		p.Heading, p.Empty = heading, empty
+		for _, c := range cards {
+			p.Items = append(p.Items, ui.Item{
+				ID: c.ID, Title: c.Title, URL: c.URL, Source: c.Source, MediaType: c.MediaType,
+				Summary: c.Summary, State: c.State, Badge: badges[c.State], CanPromote: c.CanPromote,
+				Kind: c.Kind, UndoID: c.UndoID,
+			})
+		}
+		w.Header().Set("Cache-Control", "no-store")
 		s.ui.Render(w, http.StatusOK, "items", p)
 	}
 }
