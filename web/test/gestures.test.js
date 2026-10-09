@@ -2,7 +2,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { next, swipe, reconcile, KEYS } = require("../static/gestures.js");
+const { next, swipe, undoTarget, reconcile, KEYS } = require("../static/gestures.js");
 
 test("archive and keep apply to light and deep cards", () => {
   for (const s of ["light", "deep"]) {
@@ -64,4 +64,19 @@ test("reconcile: a replay is not an error", () => {
   const r = reconcile(card(), { status: "duplicate", state: "archived" });
   assert.equal(r.undoID, "a1");
   assert.equal(r.notice, "");
+});
+
+test("undo goes to the focused card if it can be undone, else the latest actioned one", () => {
+  const can = (c) => c.undo;
+  const a = { id: "a", undo: true }, b = { id: "b", undo: true }, c = { id: "c", undo: false };
+  assert.equal(undoTarget(a, [b], can), a);
+  // Acting moved focus on to c, which has nothing to undo: undo the last action.
+  assert.equal(undoTarget(c, [a, b], can), b);
+  assert.equal(undoTarget(null, [a, b], can), b);
+  // Skips cards whose undo is gone (sent, or already undone).
+  b.undo = false;
+  assert.equal(undoTarget(c, [a, b], can), a);
+  a.undo = false;
+  assert.equal(undoTarget(c, [a, b], can), null);
+  assert.equal(undoTarget(null, [], can), null);
 });

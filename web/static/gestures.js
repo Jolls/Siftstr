@@ -43,6 +43,16 @@
     return null;
   }
 
+  // undoTarget picks the card an undo applies to: the focused card if it has
+  // something to undo, otherwise the most recently actioned card that does.
+  // Acting moves focus on to the next card, so undo cannot assume the card you
+  // just acted on is still the focused one.
+  function undoTarget(cur, history, canUndo) {
+    if (cur && canUndo(cur)) return cur;
+    for (var i = history.length - 1; i >= 0; i--) if (canUndo(history[i])) return history[i];
+    return null;
+  }
+
   var KEYS = { ArrowLeft: "archive", ArrowRight: "promote", " ": "keep", u: "undo", z: "undo" };
 
   // card is the in-page record of one article: what act() and the server
@@ -75,6 +85,9 @@
   function init(doc, win) {
     var list = doc.querySelector(".items");
     if (!list) return;
+
+    var history = []; // cards acted on this page load, oldest first
+    function canUndo(el) { return (el.dataset.undoAction || "") !== ""; }
 
     function cards() { return Array.prototype.slice.call(list.querySelectorAll("article.item")); }
 
@@ -114,6 +127,8 @@
       if (!to) return;
       var a = q.enqueue({ subject_type: c.type, subject_id: c.id, kind: kind });
       set(el, { state: to, undoID: a.action_id, prev: c.state, notice: "" });
+      history.push(el);
+      if (history.length > 50) history.shift();
     }
 
     // Buttons.
@@ -143,10 +158,21 @@
         return;
       }
       var kind = KEYS[e.key];
-      if (!kind || !cur) return;
+      if (!kind) return;
+      var typing = doc.activeElement && doc.activeElement.matches && doc.activeElement.matches("input, textarea, select, [contenteditable]");
+      if (typing) return;
+      if (kind === "undo") {
+        var target = undoTarget(cur, history, canUndo);
+        if (!target) return;
+        e.preventDefault();
+        act(target, "undo");
+        focusCard(target);
+        return;
+      }
+      if (!cur) return;
       e.preventDefault();
       act(cur, kind);
-      if (kind !== "undo") focusCard(all[all.indexOf(cur) + 1]); // on to the next card
+      focusCard(all[all.indexOf(cur) + 1]); // on to the next card
     });
 
     // Touch: swipe left/right, tap to keep. Links and buttons keep their own taps.
@@ -176,5 +202,5 @@
     cards().forEach(render);
   }
 
-  return { next: next, swipe: swipe, reconcile: reconcile, init: init, KEYS: KEYS };
+  return { next: next, swipe: swipe, undoTarget: undoTarget, reconcile: reconcile, init: init, KEYS: KEYS };
 });
