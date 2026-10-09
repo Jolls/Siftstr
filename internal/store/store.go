@@ -34,10 +34,13 @@ func Open(ctx context.Context, dataDir string) (*Store, error) {
 	return OpenFile(ctx, filepath.Join(dataDir, "siftstr.db"))
 }
 
-// OpenFile opens the database at path.
+// OpenFile opens the database at path. Transactions take the write lock when
+// they begin (_txlock=immediate): every transaction here writes, and a
+// deferred one that reads first cannot upgrade while another writer is active,
+// so SQLite would answer BUSY at once instead of waiting out busy_timeout.
 func OpenFile(ctx context.Context, path string) (*Store, error) {
 	dsn := "file:" + filepath.ToSlash(path) +
-		"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
+		"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)

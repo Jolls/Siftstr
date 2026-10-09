@@ -136,12 +136,12 @@ There is no service worker or installable app. The page must be loaded while onl
 | `pending_*` | summary received | `light` / `deep` | |
 | `pending_*` | summary failed or missing | unchanged | Retried at the next morning run |
 | `light` | archive (swipe left / `Left`) | `archived` | |
-| `light` | promote (swipe right / `Right`) | `pending_deep` | Allowed **once** per item. The deep summary arrives the next morning. |
+| `light` | promote (swipe right / `Right`) | `pending_deep` | Allowed **once** per item. The deep summary arrives the next morning. Disabled for sources with `max_depth = light` and for digests. |
 | `light` | keep (tap / `Space`) | `kept` | Skips further summarization |
 | `light` | no action by next morning run | `light` (Backlog) or `expired` | Depends on the per-source `carryover` setting |
 | `deep` | archive | `archived` | |
 | `deep` | promote **or** keep | `kept` | At this stage promote and keep do the same thing |
-| `deep` | no action by next morning run | ? | Open question |
+| `deep` | no action by next morning run | `deep` (Backlog) or `expired` | Same per-source `carryover` rule as light items; no new summary. Never auto-kept. |
 | any actioned | undo | previous state | Only while the server is still holding the action (grace period) |
 
 The day boundary is the **morning run**: carryover is applied when Claude asks for work, so no separate evening job is needed.
@@ -173,7 +173,7 @@ Sources belong to a user. They are mirrored from that user's Miniflux feed list 
 
 **Age cutoff (ingestion):** entries whose published date is older than `max_age_days` (user setting, default 14, 0 = no limit) are not ingested, so connecting to a long unread backlog does not flood the first run. Entries with no date are kept. The published date is stored on the item as `published_at`.
 
-**Digests:** one digest item per source per day. Its underlying entries are tracked as children. What each action does to a digest is an open question; see below.
+**Digests:** one digest item per source per day. Its underlying entries are tracked as children. Archive marks all children read in Miniflux. Keep saves the digest to Karakeep as a note and marks the children read. Promote is disabled.
 
 ---
 
@@ -193,7 +193,9 @@ If the session has expired, queued actions stay in the page (and `localStorage`)
 The server **stores** an action in SQLite as soon as it arrives, so the badge state is safe from then on, including across a server restart. It **holds** the action's upstream effects for a **grace period** (default 15 minutes from receipt, configurable) before acting on them.
 
 - **Undo** is just another action (`kind: undo`, pointing at the original `action_id`). It is queued and sent the same way. If the original is still held, the server cancels its effects and the item returns to its previous state.
-- **Undo after the hold ends** is refused *(proposed)*, and the client shows the item's real state. Reversing a sent write-back (e.g. deleting a Karakeep bookmark) is out of scope for v1.
+- **Last write wins.** Within a batch, actions apply in client-timestamp order. A new action replaces the subject's newest held action if its timestamp is not older; the replaced action is cancelled and the subject is restored first. An older action is rejected (`a newer action already applies`). If the earlier action was already released, the new one is rejected (`already sent upstream`). A client timestamp more than 5 minutes ahead of the server is treated as "now", so a wrong clock cannot win every comparison.
+- Rejected actions are stored too, so a replay returns the same rejection. An undo is stored as already released, since it has no upstream effect. The hold is `undo_hold_minutes` in the user's settings (default 15).
+- **Undo after the hold ends** is refused, and the client shows the item's real state. Reversing a sent write-back (e.g. deleting a Karakeep bookmark) is out of scope for v1.
 - Because the hold starts when the server *receives* an action, a swipe and its undo queued together during a dropped connection arrive together, and the undo still works.
 
 ### Write-back (server to upstream)
@@ -295,9 +297,9 @@ The default summarization prompt ships with the app and can be edited globally a
 
 ```jsonc
 // POST /sync/actions
-{ "actions": [ { "action_id": "uuid", "item_id": "itm_123", "kind": "keep", "at": "2026-10-09T07:12:03Z" } ] }
+{ "actions": [ { "action_id": "uuid", "subject_type": "item", "subject_id": "itm_123", "kind": "keep", "at": "2026-10-09T07:12:03Z" } ] }  // undo adds "target_action_id"
 // -> 200
-{ "results": [ { "action_id": "uuid", "status": "held|duplicate|rejected", "release_at": "2026-10-09T07:27:03Z", "item": { "id": "itm_123", "state": "kept" } } ] }
+{ "results": [ { "action_id": "uuid", "status": "applied|duplicate|rejected", "reason": "(when rejected)", "subject_type": "item", "subject_id": "itm_123", "state": "kept" } ] }
 ```
 
 ---
@@ -327,7 +329,8 @@ digests        id, user_id, source_id, batch_date, summary, state
 
 actions        action_id (client UUID, PK), user_id, subject_type[item|digest],
                subject_id, kind, target_action_id, client_at, received_at,
-               release_at, status[held|released|cancelled|rejected]
+               release_at, prev_state (state the action replaced), reason (why rejected),
+               status[held|released|cancelled|rejected]
 
 outbox         id, user_id, action_id, connection_id, op, payload, status,
                attempts, last_error, created_at, done_at
@@ -472,9 +475,9 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 1. ~~**Name:** the repo folder is `Siftsr`, but the chosen name is `Siftstr`. Which is it?~~ **Decided:** `Siftstr`. The folder is to be renamed.
 2. ~~**Write-back timing.**~~ **Decided:** actions are sent as they happen (queued in the page if the connection drops). The server stores them immediately and holds their effects for 15 minutes so undo works server-side.
 3. ~~**Evening job runner.**~~ **Decided:** no evening job. There is one Claude scheduled task (morning); everything else runs on Siftstr's own timers.
-4. **Deep-stage items left untriaged:** carry over again, expire, or auto-keep?
-5. **Digest actions:** what do archive, promote, and keep do to a digest? *Proposed:* archive marks all children read; keep saves the digest to Karakeep as a note and marks the children read; promote is disabled.
-6. **Light-only sources** (`max_depth = light`): is promote disabled, or does it act as keep?
+4. ~~**Deep-stage items left untriaged.**~~ **Decided (2026-10-09):** they follow the source's `carryover` rule like light items (carry to Backlog or expire). They are never auto-kept.
+5. ~~**Digest actions.**~~ **Decided (2026-10-09):** archive marks all children read; keep saves the digest to Karakeep as a note and marks the children read; promote is disabled.
+6. ~~**Light-only sources** (`max_depth = light`).~~ **Decided (2026-10-09):** promote is disabled for these items (the UI reads the source setting; no source-type special case).
 7. **Karakeep as a source:** what would be pulled from it, and how would that avoid a loop with Karakeep as a destination? Or should it be dropped as a source?
 8. **YouTube Watch Later:** Google restricted API access to the Watch Later playlist years ago, so adding to it may not be possible. A user-owned playlist could be the fallback. It also needs OAuth for a self-hosted single user. **Verify before designing around it.**
 9. **Karakeep summary field:** confirm the API can set a bookmark's summary and tags on create or update. Decide whether Siftstr's summary replaces or supplements Karakeep's own AI tagging and summary.
@@ -487,8 +490,8 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 16. **Janitor and Backlog:** should items still untriaged in Backlog after 6 months be deleted silently?
 17. ~~**Single vs. multi-user.**~~ **Decided:** the architecture and data model are multi-user from day one. v1 runs with one bootstrapped user, and user management features are on the [roadmap](ROADMAP.md).
 18. ~~**Prior art.**~~ **Decided (2026-10-09):** a web search found no project that combines Miniflux and Nostr ingest, a once-a-day Claude summary, and archive/promote/keep triage with write-back. The closest is **CondenseIt** (`wildlifechorus/condenseit`, MIT), an all-in-one digest reader: it fetches its own sources, calls an LLM itself (Ollama, OpenRouter, or an OpenAI-compatible endpoint), and ranks items from learned preferences, but has no Nostr support and no write-back. Siftstr is the integrating alternative: Miniflux and Nostr stay the system of record, decisions write back through the outbox to Karakeep, MeTube and Miniflux, and the only LLM step is one Claude run a day outside the app. Other digest tools (rssdigest, RSSbrew, RSSBox) also summarize feeds themselves. CondenseIt's source handling (Reddit thresholds, GitHub Releases, podcast search) is worth a look when those sources come up. Karakeep is a destination, not a competitor. Also considered earlier: **Readstr** (Start9 registry; upstream `privkeyio/readstr`), ruled out because it's a human-facing UI with no documented API.
-19. ~~**Undo grace period.**~~ **Decided:** server-side hold, 15 minutes from receipt (configurable). *Proposed:* undo after the hold ends is refused rather than reversed upstream.
-20. **Multiple devices:** actions from a phone and a desktop on the same item are ordered by client timestamp. Is last-write-wins acceptable?
+19. ~~**Undo grace period.**~~ **Decided:** server-side hold, 15 minutes from receipt (configurable). Undo after the hold ends is refused, not reversed upstream; the client shows the item's real state.
+20. ~~**Multiple devices.**~~ **Decided (2026-10-09):** last-write-wins by client timestamp. A later action replaces an earlier one unless the earlier action's effects were already released to the outbox, in which case it is rejected with the item's current state.
 21. ~~**StartOS package location.**~~ **Decided:** a separate repo. This repo stays platform-neutral.
 22. **Backup snapshot:** confirm the periodic `VACUUM INTO` snapshot approach, and decide how often it runs.
 

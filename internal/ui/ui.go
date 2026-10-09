@@ -94,6 +94,7 @@ type Destination struct {
 
 // User is the part of the signed-in user the templates need.
 type User struct {
+	ID   string
 	Name string
 }
 

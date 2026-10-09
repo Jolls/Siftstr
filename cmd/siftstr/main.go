@@ -29,6 +29,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/server"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/store"
+	"github.com/Jolls/Siftstr/internal/triage"
 )
 
 const usage = `usage:
@@ -119,7 +120,7 @@ func serve() error {
 		return err
 	}
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), SecureCookies: cfg.SecureCookies(),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), SecureCookies: cfg.SecureCookies(),
 	})
 	if err != nil {
 		return err
@@ -129,7 +130,7 @@ func serve() error {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	// More jobs register here as later phases add them (release, janitor).
+	// More jobs register here as later phases add them (outbox, janitor).
 	sched := scheduler.New(enabledUsers(st), nil)
 	mf := &miniflux.Ingester{DB: st.DB(), Conns: conns, New: miniflux.ClientFactory, Now: time.Now}
 	if err := sched.Register(scheduler.Job{
@@ -142,6 +143,18 @@ func serve() error {
 			if err == nil && (res.Items > 0 || res.TooOld > 0) {
 				log.Printf("miniflux ingest: %d new items, %d skipped as too old", res.Items, res.TooOld)
 			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	tr := triage.New(st.DB())
+	if err := sched.Register(scheduler.Job{
+		// Marks actions whose undo hold has ended as released. The outbox
+		// picks them up from here once the write-back phase lands.
+		Name: "release-actions", Interval: time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			_, err := tr.ReleaseDue(ctx, userID)
 			return err
 		},
 	}); err != nil {

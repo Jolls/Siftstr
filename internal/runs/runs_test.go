@@ -200,13 +200,15 @@ func TestSubmitToAnotherUsersRunIsNotFound(t *testing.T) {
 func TestCarryover(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
-	for _, id := range []string{"itm_carry", "itm_drop", "itm_today", "itm_deep"} {
+	for _, id := range []string{"itm_carry", "itm_drop", "itm_today", "itm_deep", "itm_deep_drop"} {
 		src, state := "src1", "light"
 		switch id {
 		case "itm_drop":
 			src = "src2"
 		case "itm_deep":
 			state = "deep"
+		case "itm_deep_drop":
+			src, state = "src2", "deep"
 		}
 		f.item(t, id, "u1", src, state, id)
 		day := "2026-10-08"
@@ -221,7 +223,7 @@ func TestCarryover(t *testing.T) {
 	if _, err := f.s.Create(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]string{"itm_carry": "light", "itm_drop": "expired", "itm_today": "light", "itm_deep": "deep"} {
+	for id, want := range map[string]string{"itm_carry": "light", "itm_drop": "expired", "itm_today": "light", "itm_deep": "deep", "itm_deep_drop": "expired"} {
 		if got := f.state(t, id); got != want {
 			t.Errorf("%s = %s, want %s", id, got, want)
 		}
