@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+data/
+bin/
+dist/
+*.db
+*.db-*
+*.md
+!web/static/PICO-LICENSE.md
+idea-generation.md
+Dockerfile
+compose.yaml

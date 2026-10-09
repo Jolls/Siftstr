@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +26,7 @@ import (
 
 const usage = `usage:
   siftstr serve                                  run the server (default)
+  siftstr healthcheck                            exit 0 if the local server answers /healthz (for Docker)
   siftstr user add [--admin] <username>          create a user; password is read from stdin
   siftstr user set-password <username>           reset a password; password is read from stdin`
 
@@ -43,6 +45,8 @@ func run(args []string, stdin io.Reader) error {
 	switch cmd {
 	case "serve":
 		return serve()
+	case "healthcheck":
+		return healthcheck(os.Getenv("SIFTSTR_LISTEN"))
 	case "user":
 		return userCmd(args, stdin)
 	case "help", "-h", "--help":
@@ -112,6 +116,31 @@ func serve() error {
 	log.Printf("listening on %s", cfg.Listen)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	return nil
+}
+
+// healthcheck probes /healthz on the local listener. The runtime image has no
+// shell or curl, so Docker's HEALTHCHECK runs this instead.
+func healthcheck(listen string) error {
+	if listen == "" {
+		listen = ":8080"
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Errorf("SIFTSTR_LISTEN: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/healthz")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthz returned %d", resp.StatusCode)
 	}
 	return nil
 }

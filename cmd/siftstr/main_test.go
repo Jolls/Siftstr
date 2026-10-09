@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -39,5 +41,24 @@ func TestUserAddAndSetPassword(t *testing.T) {
 	}
 	if err := run([]string{"user", "add", "bob"}, strings.NewReader("short\n")); err == nil {
 		t.Error("weak password accepted")
+	}
+}
+
+func TestHealthcheck(t *testing.T) {
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer ok.Close()
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	defer bad.Close()
+
+	if err := healthcheck(strings.TrimPrefix(ok.URL, "http://")); err != nil {
+		t.Errorf("healthy server: %v", err)
+	}
+	if err := healthcheck(strings.TrimPrefix(bad.URL, "http://")); err == nil {
+		t.Error("503 should fail the check")
+	}
+	if err := healthcheck("not-a-listen-address"); err == nil {
+		t.Error("bad address should fail")
 	}
 }

@@ -1,0 +1,26 @@
+# Example deployment for plain Docker. Put your reverse proxy (Caddy, Traefik,
+# nginx, ...) in front of port 8080; Siftstr itself only speaks plain HTTP.
+services:
+  siftstr:
+    build: .
+    # image: ghcr.io/jolls/siftstr:latest   # once images are published
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Public https:// URL that users reach Siftstr at. Drives the Secure
+      # cookie flag and absolute links.
+      SIFTSTR_BASE_URL: ${SIFTSTR_BASE_URL:-}
+      # Created on first start only, when there are no users yet.
+      SIFTSTR_ADMIN_USER: ${SIFTSTR_ADMIN_USER:-}
+      SIFTSTR_ADMIN_PASSWORD: ${SIFTSTR_ADMIN_PASSWORD:-}
+      # Optional. Leave unset to auto-generate /data/secret.key.
+      SIFTSTR_SECRET_KEY: ${SIFTSTR_SECRET_KEY:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      # Everything that must survive a restart lives here: the database,
+      # secret.key and the markdown briefings. Back up the whole volume.
+      - siftstr-data:/data
+
+volumes:
+  siftstr-data:
