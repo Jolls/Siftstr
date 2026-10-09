@@ -169,7 +169,7 @@ Sources belong to a user. They are mirrored from that user's Miniflux feed list 
 - **Article:** the full content from Miniflux where available, or Claude fetches the URL.
 - **Video/podcast** (no transcript): visit the video or episode page, skim comments for reactions, and quickly look up the people, subjects, or terms named in the title. This is a modest step up from metadata, not exhaustive research.
 
-**Excerpt rule (ingestion):** use the feed's summary/description field when it has one. Otherwise, truncate the full content to a configurable length.
+**Excerpt rule (ingestion):** use the feed's summary/description field when it has one. Otherwise, truncate the full content to a configurable length. Miniflux's entry API returns only the content, not the feed's summary field, so for Miniflux items the excerpt is always the content stripped of HTML and truncated to `excerpt_length` (user setting, default 500 characters).
 
 **Digests:** one digest item per source per day. Its underlying entries are tracked as children. What each action does to a digest is an open question; see below.
 

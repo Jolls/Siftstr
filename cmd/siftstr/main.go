@@ -20,6 +20,8 @@ import (
 
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/config"
+	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
 	"github.com/Jolls/Siftstr/internal/scheduler"
 	"github.com/Jolls/Siftstr/internal/secret"
 	"github.com/Jolls/Siftstr/internal/server"
@@ -113,8 +115,32 @@ func serve() error {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	// Jobs register here as later phases add them (ingest, release, janitor).
+	master, err := secret.Load(cfg.DataDir, cfg.SecretKey)
+	if err != nil {
+		return err
+	}
+	conns, err := connections.New(st.DB(), secret.Derive(master, "connections"))
+	if err != nil {
+		return err
+	}
+	// More jobs register here as later phases add them (release, janitor).
 	sched := scheduler.New(enabledUsers(st), nil)
+	mf := &miniflux.Ingester{DB: st.DB(), Conns: conns, New: miniflux.ClientFactory, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		Name: "ingest-miniflux", Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := mf.Run(ctx, userID)
+			if errors.Is(err, miniflux.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if err == nil && res.Items > 0 {
+				log.Printf("miniflux ingest: %d new items", res.Items)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
 	var bg sync.WaitGroup
 	bg.Add(1)
 	go func() {
