@@ -1,0 +1,28 @@
+# Go build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+/siftstr
+
+# SQLite data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/data/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Personal idea notes (not for publishing)
+/idea-generation.md
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
