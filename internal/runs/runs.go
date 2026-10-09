@@ -77,6 +77,18 @@ func (s *Service) day(ctx context.Context, tx *sql.Tx, userID string) (string, s
 	return s.Now().In(loc).Format("2006-01-02"), name, nil
 }
 
+// Today returns the user's local date (YYYY-MM-DD) for now, which is the day
+// pages group cards by.
+func (s *Service) Today(ctx context.Context, userID string) (string, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	day, _, err := s.day(ctx, tx, userID)
+	return day, err
+}
+
 // SourceRef is the source an item came from.
 type SourceRef struct {
 	ID             string  `json:"id"`

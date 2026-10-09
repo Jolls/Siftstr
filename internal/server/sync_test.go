@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // seedLight gives a signed-in user a source and a light item.
@@ -151,5 +152,46 @@ func TestSyncActionsIsolationBetweenUsers(t *testing.T) {
 	e.st.DB().QueryRow(`SELECT state FROM items WHERE id = 'itm_bob'`).Scan(&s2)
 	if s1 != "kept" || s2 != "light" {
 		t.Fatalf("alice %s, bob %s", s1, s2)
+	}
+}
+
+func TestTodayAndBacklogShowItemsAndActions(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	e.seedLight(t, "alice", "itm_new")
+	e.seedLight(t, "alice", "itm_old")
+	today := time.Now().UTC().Format("2006-01-02")
+	e.st.DB().Exec(`UPDATE items SET batch_date = ?, light_summary = 'a <b>summary</b>', title = 'Fresh one' WHERE id = 'itm_new'`, today)
+	e.st.DB().Exec(`UPDATE items SET batch_date = '2000-01-01', title = 'Stale one' WHERE id = 'itm_old'`)
+
+	get := func(path string) string {
+		resp, err := c.Get(e.srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e.body(t, resp)
+	}
+	page := get("/today")
+	if !strings.Contains(page, "Fresh one") || strings.Contains(page, "Stale one") {
+		t.Fatalf("today: %s", page)
+	}
+	if strings.Contains(page, "<b>summary</b>") {
+		t.Fatal("summary not escaped")
+	}
+	for _, want := range []string{`data-user-id=`, `/static/gestures.js`, `data-subject-type="item"`, `data-state="light"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	if b := get("/backlog"); !strings.Contains(b, "Stale one") || strings.Contains(b, "Fresh one") {
+		t.Fatalf("backlog: %s", b)
+	}
+
+	// Actioned items stay on the page with a badge and an undo.
+	e.sync(t, c, csrf, `{"actions":[{"action_id":"a1","subject_id":"itm_new","kind":"keep"}]}`)
+	page = get("/today")
+	if !strings.Contains(page, "Fresh one") || !strings.Contains(page, `data-state="kept"`) ||
+		!strings.Contains(page, `>kept</span>`) || !strings.Contains(page, `data-undo-action="a1"`) {
+		t.Fatalf("after keep: %s", page)
 	}
 }

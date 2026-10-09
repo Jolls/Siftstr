@@ -470,3 +470,91 @@ func TestReleaseDueIsScopedToTheUser(t *testing.T) {
 		t.Fatalf("u2's action is %s", status)
 	}
 }
+
+func (f *fixture) cardIDs(t *testing.T, user, list string) map[string]Card {
+	t.Helper()
+	cards, err := f.s.Cards(context.Background(), user, list, "2026-10-09")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := map[string]Card{}
+	for _, c := range cards {
+		m[c.ID] = c
+	}
+	return m
+}
+
+func TestCardsTodayAndBacklog(t *testing.T) {
+	f := newFixture(t)
+	mk := func(id, src, state, day string) {
+		f.item(t, id, "u1", src, state, "")
+		f.exec(t, `UPDATE items SET batch_date = ?, light_summary = 'light', title = ? WHERE id = ?`, day, id, id)
+	}
+	mk("today_light", "src1", "light", "2026-10-09")
+	mk("today_light_only", "src2", "light", "2026-10-09")
+	mk("today_deep", "src1", "deep", "2026-10-09")
+	mk("old_light", "src1", "light", "2026-10-08")
+	mk("old_pending", "src1", "pending_light", "2026-10-08")
+	mk("today_waiting", "src1", "pending_light", "2026-10-09")
+	mk("today_expired", "src1", "expired", "2026-10-09")
+	f.item(t, "child", "u1", "src3", "light", "dig1")
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-09' WHERE id = 'child'`)
+	f.exec(t, `UPDATE digests SET batch_date = '2026-10-09' WHERE id = 'dig1'`)
+	f.item(t, "other", "u2", "src9", "light", "")
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-09' WHERE id = 'other'`)
+
+	today := f.cardIDs(t, "u1", ListToday)
+	for _, id := range []string{"today_light", "today_light_only", "today_deep", "dig1"} {
+		if _, ok := today[id]; !ok {
+			t.Errorf("today is missing %s: %v", id, today)
+		}
+	}
+	for _, id := range []string{"old_light", "old_pending", "today_waiting", "today_expired", "child", "other"} {
+		if _, ok := today[id]; ok {
+			t.Errorf("today should not show %s", id)
+		}
+	}
+	if !today["today_light"].CanPromote || today["today_light_only"].CanPromote || !today["today_deep"].CanPromote || today["dig1"].CanPromote {
+		t.Errorf("can-promote wrong: %+v", today)
+	}
+	if today["dig1"].Kind != SubjectDigest || today["today_light"].Kind != SubjectItem {
+		t.Errorf("kinds: %+v", today)
+	}
+	if today["today_light"].Summary != "light" {
+		t.Errorf("summary %q", today["today_light"].Summary)
+	}
+
+	back := f.cardIDs(t, "u1", ListBacklog)
+	if len(back) != 1 || back["old_light"].ID == "" {
+		t.Errorf("backlog: %v", back)
+	}
+	if len(f.cardIDs(t, "u2", ListBacklog)) != 0 {
+		t.Error("u2 sees u1's backlog")
+	}
+}
+
+func TestActionedCardsStayWithAnUndoOnlyWhileHeld(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "i1", "u1", "src1", "light", "")
+	f.item(t, "i2", "u1", "src1", "light", "")
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-08'`) // both in the backlog
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-09' WHERE id = 'i2'`)
+	f.apply(t, "u1", act("a1", "i1", Archive, f.now), act("a2", "i2", Promote, f.now))
+
+	back := f.cardIDs(t, "u1", ListBacklog)
+	if c, ok := back["i1"]; !ok || c.State != "archived" || c.UndoID != "a1" {
+		t.Fatalf("held archived card should stay in the backlog with its undo: %+v", back)
+	}
+	today := f.cardIDs(t, "u1", ListToday)
+	if c := today["i2"]; c.State != "pending_deep" || c.UndoID != "a2" {
+		t.Fatalf("promoted card: %+v", today)
+	}
+
+	f.now = f.now.Add(DefaultHold + time.Minute) // the hold ends
+	if _, ok := f.cardIDs(t, "u1", ListBacklog)["i1"]; ok {
+		t.Fatal("a sent action leaves the backlog")
+	}
+	if c := f.cardIDs(t, "u1", ListToday)["i2"]; c.State != "pending_deep" || c.UndoID != "" {
+		t.Fatalf("promoted card after the hold: %+v", c)
+	}
+}

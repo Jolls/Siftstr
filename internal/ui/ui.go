@@ -109,6 +109,8 @@ type Item struct {
 	State      string // item state, see ARCHITECTURE.md §5
 	Badge      string // "archived", "promoted", "kept", or empty
 	CanPromote bool
+	Kind       string // "item" or "digest": the subject type actions use
+	UndoID     string // the held action that can still be undone, if any
 }
 
 // Renderer holds the parsed page templates.

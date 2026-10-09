@@ -362,6 +362,10 @@ An item's current outcome is derived from its latest effective action. The janit
 | `/settings/destinations` | Video destinations, export target, upstream connections |
 | `/login` | Login |
 
+**Which cards a list shows.** "Today" is the user's local date (their timezone setting). `/today` shows every card summarized today, actioned or not. `/backlog` shows cards from earlier days that are still `light` or `deep`, plus earlier cards actioned recently enough to still be undone, so an action never makes a card vanish under you. A digest is one card in place of its entries. Cards still waiting for a summary, and expired ones, appear nowhere.
+
+**Controls.** Swipe left or `Left` archives. Swipe right or `Right` promotes (on a deep card it acts as keep, and on a card that cannot be promoted it does nothing). A tap on the card body (touch only) or `Space` keeps. `u` or `z` undoes, `j`/`k` or the up/down arrows move between cards, and a key action moves focus to the next card. Keys act only on a focused card, so links, buttons and form fields keep their own keys. A touch that starts on a link or button can swipe but never counts as a tap. The page updates the badge at once and queues the action; when the server answers, its state replaces the page's guess and a rejection shows its reason on the card.
+
 - **Mobile:** a card stack. Swipe left archives, swipe right promotes, tap keeps.
 - **Desktop:** a compact list. `Up`/`Down` move between items, `Left` archives, `Right` promotes, `Space` keeps. *Proposed:* `u` undoes.
 - **All actions go through the page's action queue.** Gestures, keys, and buttons all enqueue the same action shape, and no action is a direct HTMX request. HTMX still renders pages and settings forms. The badge updates as soon as the action is queued, and a small indicator appears only while actions are waiting to be sent.

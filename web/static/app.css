@@ -4,7 +4,7 @@
 .login { max-width: 24rem; margin-inline: auto; }
 
 .items { display: grid; gap: 1rem; }
-.item { margin: 0; }
+.item { margin: 0; touch-action: pan-y; } /* vertical scroll is the browser's; horizontal swipes are ours */
 .item h2 { font-size: 1.15rem; margin-bottom: 0.25rem; }
 .item hgroup p { font-size: 0.85rem; }
 .item .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
@@ -45,3 +45,4 @@ form.inline button { margin: 0; width: auto; padding: 0.25rem 0.75rem; }
 
 .sync { color: var(--pico-muted-color); }
 .sync[data-state="auth"] { color: var(--pico-del-color); }
+.notice { font-size: 0.8rem; color: var(--pico-del-color); }
