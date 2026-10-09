@@ -1,0 +1,51 @@
+{{define "content"}}
+<h1>API keys</h1>
+{{template "settingsnav" .}}
+<p>A key lets the morning Claude task fetch your work package and send summaries back. It works on the JSON API only, and it can see only your items. Setup steps are in <code>docs/scheduled-task.md</code>.</p>
+
+{{if .NewKey}}
+<article class="new-key" role="status">
+  <h2>Copy your new key now</h2>
+  <p>It is shown once and cannot be shown again. If you lose it, revoke it and make another.</p>
+  <pre><code>{{.NewKey}}</code></pre>
+</article>
+{{end}}
+
+<article>
+  <form method="post" action="/settings/keys">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Label
+      <input name="label" maxlength="80" placeholder="claude-task" autocomplete="off">
+    </label>
+    <button type="submit">Create key</button>
+  </form>
+</article>
+
+{{if .Keys}}
+<table class="keys">
+  <thead>
+    <tr><th>Label</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Keys}}
+    <tr>
+      <td>{{if .Label}}{{.Label}}{{else}}<em>no label</em>{{end}}</td>
+      <td>{{.Created}}</td>
+      <td>{{if .LastUsed}}{{.LastUsed}}{{else}}never{{end}}</td>
+      <td>{{if .Revoked}}revoked {{.Revoked}}{{else}}active{{end}}</td>
+      <td>
+        {{if not .Revoked}}
+        <form method="post" action="/settings/keys/{{.ID}}/revoke" class="inline">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button type="submit" class="secondary outline">Revoke</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No keys yet.</p>
+{{end}}
+{{end}}

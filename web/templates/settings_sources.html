@@ -1,6 +1,22 @@
 {{define "content"}}
 <h1>Sources</h1>
 {{template "settingsnav" .}}
+<article class="timezone">
+  <form method="post" action="/settings/timezone">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Timezone
+      <select name="timezone" required>
+        {{$tz := .Timezone}}
+        {{range .ZoneGroups}}<optgroup label="{{.Region}}">
+          {{range .Zones}}<option value="{{.}}"{{if eq . $tz}} selected{{end}}>{{.}}</option>
+          {{end}}</optgroup>
+        {{end}}
+      </select>
+    </label>
+    <small>Decides which day the morning run belongs to. Everything is stored in UTC.</small>
+    <button type="submit">Save</button>
+  </form>
+</article>
 <article class="ingest">
   <form method="post" action="/settings/ingest">
     <input type="hidden" name="csrf" value="{{.CSRF}}">

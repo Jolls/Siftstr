@@ -2,6 +2,8 @@
 <nav class="subnav" aria-label="Settings">
   <ul>
     <li><a href="/settings/sources"{{if eq .Title "Sources"}} aria-current="page"{{end}}>Sources</a></li>
+    <li><a href="/settings/prompts"{{if eq .Title "Prompts"}} aria-current="page"{{end}}>Prompts</a></li>
+    <li><a href="/settings/keys"{{if eq .Title "API keys"}} aria-current="page"{{end}}>API keys</a></li>
     <li><a href="/settings/destinations"{{if eq .Title "Destinations"}} aria-current="page"{{end}}>Destinations</a></li>
   </ul>
 </nav>

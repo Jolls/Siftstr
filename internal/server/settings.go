@@ -3,10 +3,15 @@ package server
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
+	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/ui"
 )
@@ -19,7 +24,7 @@ var destinationKinds = []ui.Destination{
 	{Kind: "metube", Label: "MeTube", Help: "Where kept videos are sent to download.", SecretLabel: "Secret (optional)"},
 }
 
-var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected."}
+var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked."}
 
 func (s *server) settingsPage(sess *session, req *http.Request, title string) ui.Page {
 	p := s.page(sess, "settings", title)
@@ -38,16 +43,23 @@ func (s *server) sourcesForm(w http.ResponseWriter, req *http.Request, sess *ses
 func (s *server) renderSources(w http.ResponseWriter, req *http.Request, sess *session, status int, msg string) {
 	list, err := s.Sources.List(req.Context(), sess.User.ID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	ing, err := s.Sources.Ingest(req.Context(), sess.User.ID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	p := s.settingsPage(sess, req, "Sources")
 	p.Error = msg
+	if p.Timezone, err = s.Runs.Timezone(req.Context(), sess.User.ID); err != nil {
+		serverError(w)
+		return
+	}
+	for _, g := range runs.ZoneGroups(p.Timezone) {
+		p.ZoneGroups = append(p.ZoneGroups, ui.ZoneGroup{Region: g.Region, Zones: g.Zones})
+	}
 	p.Ingest = ui.IngestForm{ExcerptLength: ing.ExcerptLength, MaxAgeDays: ing.MaxAgeDays}
 	for _, x := range list {
 		p.Sources = append(p.Sources, ui.SourceRow{
@@ -76,7 +88,7 @@ func (s *server) sourcesSave(w http.ResponseWriter, req *http.Request, sess *ses
 	case errors.Is(err, sources.ErrNotFound):
 		http.NotFound(w, req) // another user's source looks the same as a missing one
 	case err != nil:
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 	default:
 		http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
 	}
@@ -95,7 +107,7 @@ func (s *server) ingestSave(w http.ResponseWriter, req *http.Request, sess *sess
 		return
 	}
 	if err := s.Sources.SetIngest(req.Context(), sess.User.ID, in); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
@@ -108,7 +120,7 @@ func (s *server) destinationsForm(w http.ResponseWriter, req *http.Request, sess
 func (s *server) renderDestinations(w http.ResponseWriter, req *http.Request, sess *session, status int, msg string) {
 	saved, err := s.Conns.List(req.Context(), sess.User.ID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	p := s.settingsPage(sess, req, "Destinations")
@@ -126,12 +138,7 @@ func (s *server) renderDestinations(w http.ResponseWriter, req *http.Request, se
 }
 
 func knownDestination(kind string) bool {
-	for _, d := range destinationKinds {
-		if d.Kind == kind {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(destinationKinds, func(d ui.Destination) bool { return d.Kind == kind })
 }
 
 // existing returns the user's connection of this kind, if any.
@@ -158,7 +165,7 @@ func (s *server) destinationSave(w http.ResponseWriter, req *http.Request, sess 
 	secret := req.PostFormValue("secret")
 	cur, found, err := s.existing(req, sess.User.ID, kind)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	if found {
@@ -171,10 +178,10 @@ func (s *server) destinationSave(w http.ResponseWriter, req *http.Request, sess 
 	switch {
 	case err == nil:
 		http.Redirect(w, req, "/settings/destinations?notice=saved", http.StatusSeeOther)
-	case strings.HasPrefix(err.Error(), "base URL"):
+	case errors.Is(err, connections.ErrBaseURL):
 		s.renderDestinations(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
 	default:
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 	}
 }
 
@@ -189,8 +196,124 @@ func (s *server) destinationDelete(w http.ResponseWriter, req *http.Request, ses
 		err = s.Conns.Delete(req.Context(), sess.User.ID, cur.ID)
 	}
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	http.Redirect(w, req, "/settings/destinations?notice=disconnected", http.StatusSeeOther)
+}
+
+var promptFields = []ui.PromptField{
+	{Name: runs.PromptGlobal, Label: "Global instructions", Help: "Tone and rules that apply to every summary.", Default: runs.Defaults.Global},
+	{Name: runs.PromptLight, Label: "Light summary", Help: "Used for each new item, from its title and excerpt.", Default: runs.Defaults.Light},
+	{Name: runs.PromptDeep, Label: "Deep summary", Help: "Used the morning after you promote an item.", Default: runs.Defaults.Deep},
+	{Name: runs.PromptDigest, Label: "Digest", Help: "Used for sources set to one digest a day.", Default: runs.Defaults.Digest},
+}
+
+func (s *server) promptsForm(w http.ResponseWriter, req *http.Request, sess *session) {
+	s.renderPrompts(w, req, sess, http.StatusOK, "")
+}
+
+func (s *server) renderPrompts(w http.ResponseWriter, req *http.Request, sess *session, status int, msg string) {
+	cur, err := s.Runs.Prompts(req.Context(), sess.User.ID)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	p := s.settingsPage(sess, req, "Prompts")
+	p.Error = msg
+	for _, f := range promptFields {
+		if v := cur.Get(f.Name); v != f.Default {
+			f.Value = v
+		}
+		p.Prompts = append(p.Prompts, f)
+	}
+	s.ui.Render(w, status, "settings_prompts", p)
+}
+
+func (s *server) promptsSave(w http.ResponseWriter, req *http.Request, sess *session) {
+	err := s.Runs.SetPrompt(req.Context(), sess.User.ID, req.PostFormValue("name"), req.PostFormValue("value"))
+	switch {
+	case errors.Is(err, runs.ErrUnknownPrompt):
+		http.NotFound(w, req)
+	case errors.Is(err, runs.ErrPromptTooLong):
+		s.renderPrompts(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
+	case err != nil:
+		serverError(w)
+	default:
+		http.Redirect(w, req, "/settings/prompts?notice=saved", http.StatusSeeOther)
+	}
+}
+
+func (s *server) timezoneSave(w http.ResponseWriter, req *http.Request, sess *session) {
+	if err := s.Runs.SetTimezone(req.Context(), sess.User.ID, req.PostFormValue("timezone")); err != nil {
+		if errors.Is(err, runs.ErrBadTimezone) {
+			s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
+			return
+		}
+		serverError(w)
+		return
+	}
+	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+}
+
+func (s *server) keysForm(w http.ResponseWriter, req *http.Request, sess *session) {
+	newKey, _ := s.newKeys.take(sess.Token) // set by keyCreate, shown once
+	s.renderKeys(w, req, sess, http.StatusOK, "", newKey)
+}
+
+// renderKeys lists the user's keys. newKey is set only on the first page load
+// after creating one, and that response is never cached.
+func (s *server) renderKeys(w http.ResponseWriter, req *http.Request, sess *session, status int, msg, newKey string) {
+	keys, err := s.Auth.ListAPIKeys(req.Context(), sess.User.ID)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	loc, err := time.LoadLocation(sess.User.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	show := func(t time.Time) string { return t.In(loc).Format("2006-01-02 15:04") }
+	p := s.settingsPage(sess, req, "API keys")
+	p.Error, p.NewKey = msg, newKey
+	for _, k := range keys {
+		row := ui.KeyRow{ID: k.ID, Label: k.Label, Created: show(k.CreatedAt)}
+		if k.LastUsedAt != nil {
+			row.LastUsed = show(*k.LastUsedAt)
+		}
+		if k.RevokedAt != nil {
+			row.Revoked = show(*k.RevokedAt)
+		}
+		p.Keys = append(p.Keys, row)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.ui.Render(w, status, "settings_keys", p)
+}
+
+func (s *server) keyCreate(w http.ResponseWriter, req *http.Request, sess *session) {
+	label := strings.TrimSpace(req.PostFormValue("label"))
+	if utf8.RuneCountInString(label) > 80 {
+		s.renderKeys(w, req, sess, http.StatusUnprocessableEntity, "The label is longer than 80 characters.", "")
+		return
+	}
+	_, secret, err := s.Auth.CreateAPIKey(req.Context(), sess.User.ID, label)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	// Redirect so a refresh reloads the list instead of re-submitting the form.
+	s.newKeys.put(sess.Token, secret)
+	http.Redirect(w, req, "/settings/keys", http.StatusSeeOther)
+}
+
+func (s *server) keyRevoke(w http.ResponseWriter, req *http.Request, sess *session) {
+	err := s.Auth.RevokeAPIKey(req.Context(), sess.User.ID, req.PathValue("id"))
+	switch {
+	case errors.Is(err, auth.ErrNotFound):
+		http.NotFound(w, req) // another user's key looks the same as a missing one
+	case err != nil:
+		serverError(w)
+	default:
+		http.Redirect(w, req, "/settings/keys?notice=revoked", http.StatusSeeOther)
+	}
 }

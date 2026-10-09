@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Jolls/Siftstr/internal/ids"
 )
 
 const (
@@ -57,6 +59,7 @@ type Service struct {
 	byUser    *limiter
 	byIP      *limiter
 	dummyHash string // verified against for unknown users, to even out timing
+	defaultTZ string // timezone given to new users
 }
 
 // New returns a Service. csrfKey signs CSRF tokens (see secret.Derive).
@@ -72,7 +75,20 @@ func New(db *sql.DB, csrfKey []byte) (*Service, error) {
 		byUser:    newLimiter(loginWindow, maxUserFailures),
 		byIP:      newLimiter(loginWindow, maxIPFailures),
 		dummyHash: dummy,
+		defaultTZ: "UTC",
 	}, nil
+}
+
+// SetDefaultTimezone sets the timezone new users start with (the TZ setting).
+// An unknown name is ignored and UTC stays, so a typo in TZ cannot stop
+// users from being created.
+func (s *Service) SetDefaultTimezone(name string) {
+	if name == "" || name == "Local" {
+		return
+	}
+	if _, err := time.LoadLocation(name); err == nil {
+		s.defaultTZ = name
+	}
 }
 
 func normalize(username string) string { return strings.ToLower(strings.TrimSpace(username)) }
@@ -83,14 +99,6 @@ func randomToken(n int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-func newID(prefix string) (string, error) {
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return prefix + hex.EncodeToString(b), nil
 }
 
 func hashToken(token string) string {
@@ -116,11 +124,11 @@ func (s *Service) CreateUser(ctx context.Context, username, password, role strin
 	if err != nil {
 		return User{}, err
 	}
-	id, err := newID("usr_")
+	id, err := ids.New("usr_")
 	if err != nil {
 		return User{}, err
 	}
-	u := User{ID: id, Username: username, Role: role, Timezone: "UTC"}
+	u := User{ID: id, Username: username, Role: role, Timezone: s.defaultTZ}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO users (id, username, password_hash, role, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		u.ID, u.Username, hash, u.Role, u.Timezone, s.stamp())
