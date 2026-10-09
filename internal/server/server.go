@@ -77,6 +77,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /backlog", s.protected(s.itemsPage("backlog", "Backlog", "Nothing carried over.")))
 	mux.HandleFunc("GET /settings", s.protected(s.settingsHome))
 	mux.HandleFunc("GET /settings/sources", s.protected(s.sourcesForm))
+	mux.HandleFunc("POST /settings/ingest", s.protected(s.ingestSave))
 	mux.HandleFunc("POST /settings/sources/{id}", s.protected(s.sourcesSave))
 	mux.HandleFunc("GET /settings/destinations", s.protected(s.destinationsForm))
 	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))

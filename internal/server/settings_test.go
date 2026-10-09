@@ -169,3 +169,29 @@ func TestSourcesSaveAndIsolation(t *testing.T) {
 		t.Fatalf("invalid = %d", resp.StatusCode)
 	}
 }
+
+func TestIngestSettings(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	_, body := e.get(t, c, "/settings/sources")
+	if !strings.Contains(body, `name="max_age_days" min="0" max="3650" value="14"`) {
+		t.Fatal("default max age not shown")
+	}
+	v := url.Values{"csrf": {csrf}, "max_age_days": {"30"}, "excerpt_length": {"300"}}
+	if resp := e.post(t, c, "/settings/ingest", v); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	_, body = e.get(t, c, "/settings/sources")
+	if !strings.Contains(body, `value="30"`) || !strings.Contains(body, `value="300"`) {
+		t.Fatal("saved values not shown")
+	}
+	for _, bad := range []url.Values{
+		{"csrf": {csrf}, "max_age_days": {"-1"}, "excerpt_length": {"300"}},
+		{"csrf": {csrf}, "max_age_days": {"x"}, "excerpt_length": {"300"}},
+		{"csrf": {csrf}, "max_age_days": {"5"}, "excerpt_length": {"10"}},
+	} {
+		if resp := e.post(t, c, "/settings/ingest", bad); resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("%v = %d", bad, resp.StatusCode)
+		}
+	}
+}

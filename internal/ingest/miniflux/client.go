@@ -34,6 +34,7 @@ type Entry struct {
 	URL        string
 	Content    string // HTML
 	Enclosures []Enclosure
+	Published  time.Time // zero when Miniflux gave no date
 }
 
 // API is the slice of Miniflux that ingest needs. Tests use a fake.
@@ -117,6 +118,7 @@ func (c *Client) UnreadEntries(ctx context.Context) ([]Entry, error) {
 				Title      string `json:"title"`
 				URL        string `json:"url"`
 				Content    string `json:"content"`
+				Published  string `json:"published_at"`
 				Enclosures []struct {
 					URL      string `json:"url"`
 					MimeType string `json:"mime_type"`
@@ -135,6 +137,9 @@ func (c *Client) UnreadEntries(ctx context.Context) ([]Entry, error) {
 		}
 		for _, e := range page.Entries {
 			en := Entry{ID: e.ID, FeedID: e.FeedID, Title: e.Title, URL: e.URL, Content: e.Content}
+			if t, err := time.Parse(time.RFC3339, e.Published); err == nil {
+				en.Published = t
+			}
 			for _, x := range e.Enclosures {
 				en.Enclosures = append(en.Enclosures, Enclosure{URL: x.URL, MimeType: x.MimeType})
 			}

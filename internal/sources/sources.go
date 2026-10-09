@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -98,6 +99,72 @@ func (s *Service) Update(ctx context.Context, userID, id string, in Settings) er
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// Defaults for the per-user ingest settings stored in user_settings.
+const (
+	DefaultExcerptLength = 500
+	DefaultMaxAgeDays    = 14
+)
+
+// IngestSettings are the user-level knobs that apply to every source.
+type IngestSettings struct {
+	ExcerptLength int // characters kept in an item's excerpt
+	MaxAgeDays    int // skip entries published longer ago; 0 means no limit
+}
+
+// Validate bounds both values.
+func (s IngestSettings) Validate() error {
+	switch {
+	case s.ExcerptLength < 50 || s.ExcerptLength > 5000:
+		return errors.New("excerpt length must be between 50 and 5000")
+	case s.MaxAgeDays < 0 || s.MaxAgeDays > 3650:
+		return errors.New("max age must be between 0 and 3650 days")
+	}
+	return nil
+}
+
+// Ingest returns userID's ingest settings, filling defaults.
+func (s *Service) Ingest(ctx context.Context, userID string) (IngestSettings, error) {
+	out := IngestSettings{ExcerptLength: DefaultExcerptLength, MaxAgeDays: DefaultMaxAgeDays}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT key, value FROM user_settings WHERE user_id = ? AND key IN ('excerpt_length', 'max_age_days')`, userID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return out, err
+		}
+		n, convErr := strconv.Atoi(v)
+		if convErr != nil {
+			continue
+		}
+		switch k {
+		case "excerpt_length":
+			out.ExcerptLength = n
+		case "max_age_days":
+			out.MaxAgeDays = n
+		}
+	}
+	return out, rows.Err()
+}
+
+// SetIngest saves userID's ingest settings.
+func (s *Service) SetIngest(ctx context.Context, userID string, in IngestSettings) error {
+	if err := in.Validate(); err != nil {
+		return err
+	}
+	for k, v := range map[string]int{"excerpt_length": in.ExcerptLength, "max_age_days": in.MaxAgeDays} {
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
+			 ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`, userID, k, strconv.Itoa(v)); err != nil {
+			return fmt.Errorf("save setting %s: %w", k, err)
+		}
 	}
 	return nil
 }

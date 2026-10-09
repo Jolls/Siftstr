@@ -1,6 +1,21 @@
 {{define "content"}}
 <h1>Sources</h1>
 {{template "settingsnav" .}}
+<article class="ingest">
+  <form method="post" action="/settings/ingest">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <h2>Ingest</h2>
+    <div class="grid">
+      <label>Skip entries older than (days, 0 = no limit)
+        <input type="number" name="max_age_days" min="0" max="3650" value="{{.Ingest.MaxAgeDays}}" required>
+      </label>
+      <label>Excerpt length (characters)
+        <input type="number" name="excerpt_length" min="50" max="5000" value="{{.Ingest.ExcerptLength}}" required>
+      </label>
+    </div>
+    <button type="submit">Save</button>
+  </form>
+</article>
 {{if .Sources}}
 <p>Your Miniflux feeds appear here after the next ingest run. Changes apply to new items and to the next morning run.</p>
 {{range .Sources}}

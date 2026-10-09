@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Jolls/Siftstr/internal/connections"
@@ -40,8 +41,14 @@ func (s *server) renderSources(w http.ResponseWriter, req *http.Request, sess *s
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	ing, err := s.Sources.Ingest(req.Context(), sess.User.ID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	p := s.settingsPage(sess, req, "Sources")
 	p.Error = msg
+	p.Ingest = ui.IngestForm{ExcerptLength: ing.ExcerptLength, MaxAgeDays: ing.MaxAgeDays}
 	for _, x := range list {
 		p.Sources = append(p.Sources, ui.SourceRow{
 			ID: x.ID, Name: x.Name, Category: x.Category, Kind: x.Kind,
@@ -73,6 +80,25 @@ func (s *server) sourcesSave(w http.ResponseWriter, req *http.Request, sess *ses
 	default:
 		http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
 	}
+}
+
+func (s *server) ingestSave(w http.ResponseWriter, req *http.Request, sess *session) {
+	excerpt, err1 := strconv.Atoi(strings.TrimSpace(req.PostFormValue("excerpt_length")))
+	maxAge, err2 := strconv.Atoi(strings.TrimSpace(req.PostFormValue("max_age_days")))
+	if err1 != nil || err2 != nil {
+		s.renderSources(w, req, sess, http.StatusUnprocessableEntity, "Both values must be whole numbers.")
+		return
+	}
+	in := sources.IngestSettings{ExcerptLength: excerpt, MaxAgeDays: maxAge}
+	if err := in.Validate(); err != nil {
+		s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
+		return
+	}
+	if err := s.Sources.SetIngest(req.Context(), sess.User.ID, in); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
 }
 
 func (s *server) destinationsForm(w http.ResponseWriter, req *http.Request, sess *session) {

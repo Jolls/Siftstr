@@ -230,7 +230,7 @@ func TestClientAgainstHTTPFake(t *testing.T) {
 		switch q.Get("offset") {
 		case "0":
 			for i := 0; i < pageSize; i++ {
-				entries = append(entries, map[string]any{"id": i + 1, "feed_id": 3, "title": "t", "url": "u"})
+				entries = append(entries, map[string]any{"id": i + 1, "feed_id": 3, "title": "t", "url": "u", "published_at": "2026-01-01T10:00:00+01:00"})
 			}
 		case "100":
 			entries = append(entries, map[string]any{"id": 101, "feed_id": 3, "title": "last", "url": "u",
@@ -247,7 +247,7 @@ func TestClientAgainstHTTPFake(t *testing.T) {
 		t.Fatalf("feeds = %+v, %v", feeds, err)
 	}
 	es, err := c.UnreadEntries(context.Background())
-	if err != nil || len(es) != 101 || es[100].Enclosures[0].MimeType != "audio/mpeg" {
+	if err != nil || len(es) != 101 || !es[0].Published.Equal(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) || es[100].Enclosures[0].MimeType != "audio/mpeg" {
 		t.Fatalf("entries = %d, %v", len(es), err)
 	}
 }
@@ -258,5 +258,36 @@ func TestClientErrorDoesNotLeakToken(t *testing.T) {
 	_, err := NewClient(srv.URL, "supersecret", nil).Feeds(context.Background())
 	if err == nil || strings.Contains(err.Error(), "supersecret") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestMaxAgeSkipsOldEntriesAndStoresPublishedDate(t *testing.T) {
+	ctx := context.Background()
+	g, f, st := setup(t) // now = 2026-01-02
+	connect(t, g, "u1", "t")
+	f.feeds = []Feed{{ID: 1, Title: "B"}}
+	f.entries = []Entry{
+		{ID: 1, FeedID: 1, Title: "fresh", URL: "https://x.example/1", Published: time.Date(2025, 12, 30, 8, 0, 0, 0, time.UTC)},
+		{ID: 2, FeedID: 1, Title: "stale", URL: "https://x.example/2", Published: time.Date(2025, 11, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: 3, FeedID: 1, Title: "undated", URL: "https://x.example/3"},
+	}
+	res, err := g.Run(ctx, "u1")
+	if err != nil || res.Items != 2 || res.TooOld != 1 {
+		t.Fatalf("res = %+v, %v", res, err)
+	}
+	var pub string
+	if err := st.DB().QueryRow(`SELECT published_at FROM items WHERE external_id = '1'`).Scan(&pub); err != nil || pub != "2025-12-30T08:00:00Z" {
+		t.Fatalf("published_at = %q, %v", pub, err)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM items WHERE external_id = '3' AND published_at IS NULL`); got != 1 {
+		t.Fatal("undated entry should be kept with a null date")
+	}
+
+	// 0 switches the limit off; a custom value moves it.
+	if _, err := st.DB().Exec(`INSERT INTO user_settings (user_id, key, value) VALUES ('u1', 'max_age_days', '0')`); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = g.Run(ctx, "u1"); err != nil || res.Items != 1 || res.TooOld != 0 {
+		t.Fatalf("no limit: %+v, %v", res, err)
 	}
 }

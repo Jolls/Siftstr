@@ -16,10 +16,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/sources"
 )
 
 // DefaultExcerptLength is used when the user has not set excerpt_length.
-const DefaultExcerptLength = 500
+const DefaultExcerptLength = sources.DefaultExcerptLength
+
+// DefaultMaxAgeDays is used when the user has not set max_age_days. Unread
+// entries published longer ago than this are not ingested.
+const DefaultMaxAgeDays = sources.DefaultMaxAgeDays
 
 // ErrNoConnection means the user has not saved a Miniflux connection.
 var ErrNoConnection = errors.New("no miniflux connection")
@@ -43,6 +48,7 @@ type Ingester struct {
 type Result struct {
 	Sources int // feeds mirrored into sources
 	Items   int // new items inserted
+	TooOld  int // entries skipped for being older than max_age_days
 }
 
 // Run ingests for one user. It never reads another user's rows.
@@ -72,23 +78,36 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	now := g.Now().UTC().Format(time.RFC3339)
-	limit := g.excerptLength(ctx, userID)
+	nowT := g.Now().UTC()
+	now := nowT.Format(time.RFC3339)
+	limit := g.intSetting(ctx, userID, "excerpt_length", DefaultExcerptLength, 1)
+	var cutoff time.Time // zero means no age limit
+	if days := g.intSetting(ctx, userID, "max_age_days", DefaultMaxAgeDays, 0); days > 0 {
+		cutoff = nowT.AddDate(0, 0, -days)
+	}
 	for _, e := range entries {
 		src, ok := sources[strconv.FormatInt(e.FeedID, 10)]
 		if !ok || !src.enabled {
+			continue
+		}
+		if !cutoff.IsZero() && !e.Published.IsZero() && e.Published.Before(cutoff) {
+			res.TooOld++
 			continue
 		}
 		id, err := newID("itm_")
 		if err != nil {
 			return res, err
 		}
+		var published any
+		if !e.Published.IsZero() {
+			published = e.Published.UTC().Format(time.RFC3339)
+		}
 		r, err := g.DB.ExecContext(ctx,
-			`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, state, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_light', ?, ?)
+			`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, published_at, state, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_light', ?, ?)
 			 ON CONFLICT (user_id, source_id, external_id) DO NOTHING`,
 			id, userID, src.id, strconv.FormatInt(e.ID, 10), MediaType(e), e.URL, strings.TrimSpace(e.Title),
-			Excerpt(e.Content, limit), nullIfEmpty(e.Content), now, now)
+			Excerpt(e.Content, limit), nullIfEmpty(e.Content), published, now, now)
 		if err != nil {
 			return res, fmt.Errorf("insert item: %w", err)
 		}
@@ -141,14 +160,16 @@ func (g *Ingester) syncSources(ctx context.Context, userID string, feeds []Feed)
 	return out, nil
 }
 
-func (g *Ingester) excerptLength(ctx context.Context, userID string) int {
+// intSetting reads an integer user setting that is at least min, else def.
+// max_age_days uses min 0 so that 0 can switch the age limit off.
+func (g *Ingester) intSetting(ctx context.Context, userID, key string, def, min int) int {
 	var v string
 	err := g.DB.QueryRowContext(ctx,
-		`SELECT value FROM user_settings WHERE user_id = ? AND key = 'excerpt_length'`, userID).Scan(&v)
-	if n, convErr := strconv.Atoi(v); err == nil && convErr == nil && n > 0 {
+		`SELECT value FROM user_settings WHERE user_id = ? AND key = ?`, userID, key).Scan(&v)
+	if n, convErr := strconv.Atoi(v); err == nil && convErr == nil && n >= min {
 		return n
 	}
-	return DefaultExcerptLength
+	return def
 }
 
 func newID(prefix string) (string, error) {

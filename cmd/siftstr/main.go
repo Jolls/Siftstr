@@ -136,8 +136,8 @@ func serve() error {
 			if errors.Is(err, miniflux.ErrNoConnection) {
 				return nil // nothing configured yet
 			}
-			if err == nil && res.Items > 0 {
-				log.Printf("miniflux ingest: %d new items", res.Items)
+			if err == nil && (res.Items > 0 || res.TooOld > 0) {
+				log.Printf("miniflux ingest: %d new items, %d skipped as too old", res.Items, res.TooOld)
 			}
 			return err
 		},

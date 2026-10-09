@@ -27,7 +27,14 @@ type Page struct {
 	// Settings pages.
 	Notice       string // one-line confirmation, e.g. "Saved."
 	Sources      []SourceRow
+	Ingest       IngestForm
 	Destinations []Destination
+}
+
+// IngestForm holds the user-level ingest settings shown above the source list.
+type IngestForm struct {
+	ExcerptLength int
+	MaxAgeDays    int
 }
 
 // SourceRow is one editable source on /settings/sources.

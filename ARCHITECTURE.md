@@ -171,6 +171,8 @@ Sources belong to a user. They are mirrored from that user's Miniflux feed list 
 
 **Excerpt rule (ingestion):** use the feed's summary/description field when it has one. Otherwise, truncate the full content to a configurable length. Miniflux's entry API returns only the content, not the feed's summary field, so for Miniflux items the excerpt is always the content stripped of HTML and truncated to `excerpt_length` (user setting, default 500 characters).
 
+**Age cutoff (ingestion):** entries whose published date is older than `max_age_days` (user setting, default 14, 0 = no limit) are not ingested, so connecting to a long unread backlog does not flood the first run. Entries with no date are kept. The published date is stored on the item as `published_at`.
+
 **Digests:** one digest item per source per day. Its underlying entries are tracked as children. What each action does to a digest is an open question; see below.
 
 ---
@@ -317,7 +319,7 @@ sources        id, user_id, kind[miniflux_feed|nostr], external_id, name, catego
                UNIQUE(user_id, kind, external_id)
 
 items          id, user_id, source_id, external_id, media_type, url, title,
-               excerpt, content, state, light_summary, deep_summary, promoted_at,
+               excerpt, content, published_at, state, light_summary, deep_summary, promoted_at,
                batch_date, digest_id, created_at, updated_at
                UNIQUE(user_id, source_id, external_id)
 
