@@ -93,6 +93,11 @@ docker buildx build --platform linux/amd64,linux/arm64 -t siftstr .   # release 
 - When you change behavior that ARCHITECTURE.md describes, update ARCHITECTURE.md in the same change.
 - Don't silently resolve an item in ARCHITECTURE.md's open questions. Ask the user, then record the decision.
 
+## Working agreements
+
+- **Memory stays in this repo, locally.** Any memory an agent keeps about this project goes in `.agent-memory/` at the repo root. It is git-ignored: never commit it, and don't store project memory anywhere else. Memory is for short-term notes. Anything lasting belongs in its proper project file (ARCHITECTURE.md, ROADMAP.md, this file, docs/), so promote it there and delete it from memory. An empty memory folder is the goal.
+- **No automatic commits.** Leave changes uncommitted so the user can review the file diffs. Commit only when the user says to, for example "commit when done". That counts as approval for that request only, not for later work. The same goes for pushing.
+
 ## Testing priorities
 
 1. The triage state machine: every transition, the promote-once rule, and undo.

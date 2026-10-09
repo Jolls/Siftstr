@@ -21,6 +21,9 @@
 # Personal idea notes (not for publishing)
 /idea-generation.md
 
+# Agent memory (local only)
+/.agent-memory/
+
 # Editor / OS
 .vscode/
 .idea/
