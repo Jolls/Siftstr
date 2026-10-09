@@ -2,15 +2,18 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Jolls/Siftstr/internal/ui"
 )
 
-// New returns the HTTP handler. Auth, sessions and CSRF arrive with
-// internal/auth; until then /login only renders the form.
-func New() (http.Handler, error) {
+// New returns the HTTP handler. ready reports whether the database is open
+// and migrated; /healthz returns 200 only while it succeeds. Auth, sessions
+// and CSRF arrive with internal/auth; until then /login only renders the form.
+func New(ready func(context.Context) error) (http.Handler, error) {
 	r, err := ui.New()
 	if err != nil {
 		return nil, err
@@ -21,7 +24,13 @@ func New() (http.Handler, error) {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), 3*time.Second)
+		defer cancel()
+		if err := ready(ctx); err != nil {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "ok")
 	})

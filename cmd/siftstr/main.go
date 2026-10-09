@@ -12,7 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Jolls/Siftstr/internal/config"
 	"github.com/Jolls/Siftstr/internal/server"
+	"github.com/Jolls/Siftstr/internal/store"
 )
 
 func main() {
@@ -36,22 +38,29 @@ func run(args []string) error {
 }
 
 func serve() error {
-	listen := os.Getenv("SIFTSTR_LISTEN")
-	if listen == "" {
-		listen = ":8080"
+	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		return err
 	}
-	h, err := server.New()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	st, err := store.Open(ctx, cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	h, err := server.New(st.Ping)
 	if err != nil {
 		return err
 	}
 	srv := &http.Server{
-		Addr:              listen,
+		Addr:              cfg.Listen,
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -59,7 +68,7 @@ func serve() error {
 		_ = srv.Shutdown(shutdown)
 	}()
 
-	log.Printf("listening on %s", listen)
+	log.Printf("listening on %s", cfg.Listen)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

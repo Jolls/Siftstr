@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,7 +11,12 @@ import (
 
 func get(t *testing.T, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	h, err := New()
+	return getReady(t, path, nil)
+}
+
+func getReady(t *testing.T, path string, readyErr error) *httptest.ResponseRecorder {
+	t.Helper()
+	h, err := New(func(context.Context) error { return readyErr })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,6 +27,12 @@ func get(t *testing.T, path string) *httptest.ResponseRecorder {
 
 func TestHealthz(t *testing.T) {
 	if rec := get(t, "/healthz"); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestHealthzUnavailable(t *testing.T) {
+	if rec := getReady(t, "/healthz", errors.New("db down")); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d", rec.Code)
 	}
 }
