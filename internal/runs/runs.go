@@ -144,10 +144,11 @@ func (s *Service) Create(ctx context.Context, userID string) (WorkPackage, error
 	now := s.Now().UTC().Format(time.RFC3339)
 
 	// Carryover. "carry" needs no change: an untriaged item with an older
-	// batch_date is the Backlog. "drop" expires it, digest children with it.
+	// batch_date is the Backlog, light or deep. "drop" expires it, digest
+	// children with it.
 	dropSources := `source_id IN (SELECT id FROM sources WHERE user_id = ? AND carryover = 'drop')`
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE items SET state = 'expired', updated_at = ? WHERE user_id = ? AND state = 'light' AND batch_date < ? AND `+dropSources,
+		`UPDATE items SET state = 'expired', updated_at = ? WHERE user_id = ? AND state IN ('light', 'deep') AND batch_date < ? AND `+dropSources,
 		now, userID, today, userID); err != nil {
 		return wp, fmt.Errorf("carryover items: %w", err)
 	}

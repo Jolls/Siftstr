@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func open(t *testing.T) *Store {
@@ -36,7 +37,7 @@ func TestOpenAppliesMigrationsOnceAndUsesWAL(t *testing.T) {
 	}
 	defer s.Close()
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 3 {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 4 {
 		t.Fatalf("migrations = %d, %v", n, err)
 	}
 }
@@ -88,5 +89,30 @@ func TestItemCannotReferenceOtherUsersSource(t *testing.T) {
 	}
 	if err := exec(insert, "i2", "u2", "e2"); err == nil {
 		t.Fatal("item for u2 referencing u1's source was accepted")
+	}
+}
+
+// Transactions take the write lock when they begin, so a transaction that
+// reads before it writes cannot hit BUSY on lock upgrade.
+func TestTransactionsTakeTheWriteLockUpFront(t *testing.T) {
+	ctx := context.Background()
+	s, err := OpenFile(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	// A second writer has to wait, even though tx has not written anything.
+	short, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	other, err := s.db.BeginTx(short, nil)
+	if err == nil {
+		other.Rollback()
+		t.Fatal("second transaction began while the first held the write lock")
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/connections"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
+	"github.com/Jolls/Siftstr/internal/triage"
 	"github.com/Jolls/Siftstr/internal/ui"
 )
 
@@ -36,6 +37,7 @@ type Deps struct {
 	Conns   *connections.Service
 	Sources *sources.Service
 	Runs    *runs.Service
+	Triage  *triage.Service
 	// SecureCookies sets the Secure flag. It comes from SIFTSTR_BASE_URL, not
 	// from r.TLS, because TLS ends at the reverse proxy.
 	SecureCookies bool
@@ -80,6 +82,7 @@ func New(d Deps) (http.Handler, error) {
 	}))
 	mux.HandleFunc("GET /today", s.protected(s.itemsPage("today", "Today", "Nothing to sift yet.")))
 	mux.HandleFunc("GET /backlog", s.protected(s.itemsPage("backlog", "Backlog", "Nothing carried over.")))
+	mux.HandleFunc("POST /sync/actions", s.protected(s.syncActions))
 	mux.HandleFunc("GET /settings", s.protected(s.settingsHome))
 	mux.HandleFunc("GET /settings/sources", s.protected(s.sourcesForm))
 	mux.HandleFunc("POST /settings/ingest", s.protected(s.ingestSave))
@@ -193,7 +196,7 @@ func (s *server) ping(w http.ResponseWriter, _ *http.Request, u auth.User) {
 }
 
 func (s *server) page(sess *session, active, title string) ui.Page {
-	return ui.Page{Title: title, Active: active, User: &ui.User{Name: sess.User.Username}, CSRF: sess.CSRF}
+	return ui.Page{Title: title, Active: active, User: &ui.User{ID: sess.User.ID, Name: sess.User.Username}, CSRF: sess.CSRF}
 }
 
 // itemsPage renders an item list. Items arrive with ingest and the triage

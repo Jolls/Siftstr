@@ -8,10 +8,10 @@
   <link rel="stylesheet" href="/static/pico.min.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
+<body{{if .User}} data-user-id="{{.User.ID}}" data-csrf="{{.CSRF}}"{{end}}>
   <header class="container">
     <nav>
-      <ul><li><strong>Siftstr</strong></li></ul>
+      <ul><li><strong>Siftstr</strong></li><li><small class="sync" data-sync-status role="status" aria-live="polite" hidden></small></li></ul>
       {{if .User}}
       <ul>
         <li><a href="/today"{{if eq .Active "today"}} aria-current="page"{{end}}>Today</a></li>
@@ -19,7 +19,7 @@
         <li><a href="/read"{{if eq .Active "read"}} aria-current="page"{{end}}>Read</a></li>
         <li><a href="/settings/sources"{{if eq .Active "settings"}} aria-current="page"{{end}}>Settings</a></li>
         <li>
-          <form method="post" action="/logout" class="inline">
+          <form method="post" action="/logout" class="inline" data-logout>
             <input type="hidden" name="csrf" value="{{.CSRF}}">
             <button type="submit" class="secondary outline">Sign out</button>
           </form>
@@ -31,5 +31,7 @@
   <main class="container">
 {{template "content" .}}
   </main>
+  {{if .User}}<script src="/static/queue.js"></script>
+  <script src="/static/sync.js"></script>{{end}}
 </body>
 </html>{{end}}
