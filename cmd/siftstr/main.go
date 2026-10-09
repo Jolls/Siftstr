@@ -14,11 +14,13 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/config"
+	"github.com/Jolls/Siftstr/internal/scheduler"
 	"github.com/Jolls/Siftstr/internal/secret"
 	"github.com/Jolls/Siftstr/internal/server"
 	"github.com/Jolls/Siftstr/internal/store"
@@ -106,6 +108,19 @@ func serve() error {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Jobs register here as later phases add them (ingest, release, janitor).
+	sched := scheduler.New(enabledUsers(st), nil)
+	var bg sync.WaitGroup
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		sched.Run(ctx)
+	}()
+	defer func() { // stop the scheduler on any exit path, then let runs finish
+		stop()
+		bg.Wait()
+	}()
+
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -118,6 +133,26 @@ func serve() error {
 		return err
 	}
 	return nil
+}
+
+// enabledUsers lists the users whose scheduled jobs should run.
+func enabledUsers(st *store.Store) scheduler.UserLister {
+	return func(ctx context.Context) ([]string, error) {
+		rows, err := st.DB().QueryContext(ctx, `SELECT id FROM users WHERE disabled = 0 ORDER BY created_at`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		return ids, rows.Err()
+	}
 }
 
 // healthcheck probes /healthz on the local listener. The runtime image has no
