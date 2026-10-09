@@ -1,0 +1,10 @@
+{{define "settingsnav"}}
+<nav class="subnav" aria-label="Settings">
+  <ul>
+    <li><a href="/settings/sources"{{if eq .Title "Sources"}} aria-current="page"{{end}}>Sources</a></li>
+    <li><a href="/settings/destinations"{{if eq .Title "Destinations"}} aria-current="page"{{end}}>Destinations</a></li>
+  </ul>
+</nav>
+{{if .Notice}}<p role="status" class="notice">{{.Notice}}</p>{{end}}
+{{if .Error}}<p role="alert" class="error">{{.Error}}</p>{{end}}
+{{end}}

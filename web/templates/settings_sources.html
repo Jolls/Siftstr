@@ -1,0 +1,45 @@
+{{define "content"}}
+<h1>Sources</h1>
+{{template "settingsnav" .}}
+{{if .Sources}}
+<p>Your Miniflux feeds appear here after the next ingest run. Changes apply to new items and to the next morning run.</p>
+{{range .Sources}}
+<article class="source" id="src-{{.ID}}">
+  <form method="post" action="/settings/sources/{{.ID}}">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <hgroup>
+      <h2>{{.Name}}</h2>
+      {{if .Category}}<p>{{.Category}}</p>{{end}}
+    </hgroup>
+    <div class="grid">
+      <label>Granularity
+        <select name="granularity">
+          <option value="individual"{{if eq .Granularity "individual"}} selected{{end}}>Individual items</option>
+          <option value="digest"{{if eq .Granularity "digest"}} selected{{end}}>One digest a day</option>
+        </select>
+      </label>
+      <label>Max depth
+        <select name="max_depth">
+          <option value="deep"{{if eq .MaxDepth "deep"}} selected{{end}}>Deep</option>
+          <option value="light"{{if eq .MaxDepth "light"}} selected{{end}}>Light only</option>
+        </select>
+      </label>
+      <label>Untriaged items
+        <select name="carryover">
+          <option value="carry"{{if eq .Carryover "carry"}} selected{{end}}>Carry to Backlog</option>
+          <option value="drop"{{if eq .Carryover "drop"}} selected{{end}}>Drop</option>
+        </select>
+      </label>
+    </div>
+    <label>Prompt override
+      <textarea name="prompt_override" rows="3" maxlength="8000" placeholder="Uses the global prompt when empty">{{.PromptOverride}}</textarea>
+    </label>
+    <label><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Enabled</label>
+    <button type="submit">Save</button>
+  </form>
+</article>
+{{end}}
+{{else}}
+<p>No sources yet. Connect Miniflux under <a href="/settings/destinations">Destinations</a>; feeds are mirrored on the next ingest run (every 30 minutes).</p>
+{{end}}
+{{end}}

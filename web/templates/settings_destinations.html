@@ -1,0 +1,30 @@
+{{define "content"}}
+<h1>Destinations</h1>
+{{template "settingsnav" .}}
+<p>Saved secrets are never shown again. Leave the secret blank to keep the one you saved.</p>
+{{range .Destinations}}
+<article class="destination" id="dest-{{.Kind}}">
+  <form method="post" action="/settings/destinations/{{.Kind}}">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <hgroup>
+      <h2>{{.Label}}</h2>
+      <p>{{.Help}}</p>
+    </hgroup>
+    <label>Base URL
+      <input type="url" name="base_url" value="{{.BaseURL}}" placeholder="https://example.com" required autocomplete="off">
+    </label>
+    <label>{{.SecretLabel}}
+      <input type="password" name="secret" autocomplete="new-password" placeholder="{{if .HasSecret}}Saved. Enter a new one to replace it.{{end}}">
+    </label>
+    {{if .HasSecret}}<label><input type="checkbox" name="clear_secret" value="1"> Remove the saved secret</label>{{end}}
+    <button type="submit">{{if .Connected}}Save{{else}}Connect{{end}}</button>
+  </form>
+  {{if .Connected}}
+  <form method="post" action="/settings/destinations/{{.Kind}}/delete" class="inline">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <button type="submit" class="secondary outline">Disconnect</button>
+  </form>
+  {{end}}
+</article>
+{{end}}
+{{end}}

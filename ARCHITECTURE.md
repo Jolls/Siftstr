@@ -152,7 +152,7 @@ The notes say "no action = sent on for a light summary next time." This doc read
 
 ## 6. Sources and per-source settings
 
-Sources belong to a user. They are mirrored from that user's Miniflux feed list (with categories) and from the Nostr follows they configure in Siftstr. The Settings page has a table with one row per source and three independent settings:
+Sources belong to a user. They are mirrored from that user's Miniflux feed list (with categories) and from the Nostr follows they configure in Siftstr. The Settings page (`/settings/sources`) has one form per source, saved independently, with three independent settings:
 
 | Setting | Values | Default *(proposed)* | Notes |
 |---|---|---|---|

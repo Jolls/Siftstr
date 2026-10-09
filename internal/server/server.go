@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/auth"
+	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/ui"
 )
 
@@ -29,6 +31,9 @@ type Deps struct {
 	// returns 200 only while it succeeds.
 	Ready func(context.Context) error
 	Auth  *auth.Service
+	// Conns and Sources back the settings pages.
+	Conns   *connections.Service
+	Sources *sources.Service
 	// SecureCookies sets the Secure flag. It comes from SIFTSTR_BASE_URL, not
 	// from r.TLS, because TLS ends at the reverse proxy.
 	SecureCookies bool
@@ -70,6 +75,12 @@ func New(d Deps) (http.Handler, error) {
 	}))
 	mux.HandleFunc("GET /today", s.protected(s.itemsPage("today", "Today", "Nothing to sift yet.")))
 	mux.HandleFunc("GET /backlog", s.protected(s.itemsPage("backlog", "Backlog", "Nothing carried over.")))
+	mux.HandleFunc("GET /settings", s.protected(s.settingsHome))
+	mux.HandleFunc("GET /settings/sources", s.protected(s.sourcesForm))
+	mux.HandleFunc("POST /settings/sources/{id}", s.protected(s.sourcesSave))
+	mux.HandleFunc("GET /settings/destinations", s.protected(s.destinationsForm))
+	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))
+	mux.HandleFunc("POST /settings/destinations/{kind}/delete", s.protected(s.destinationDelete))
 	return secureHeaders(mux), nil
 }
 

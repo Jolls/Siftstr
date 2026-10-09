@@ -23,6 +23,36 @@ type Page struct {
 	Heading string
 	Empty   string
 	Items   []Item
+
+	// Settings pages.
+	Notice       string // one-line confirmation, e.g. "Saved."
+	Sources      []SourceRow
+	Destinations []Destination
+}
+
+// SourceRow is one editable source on /settings/sources.
+type SourceRow struct {
+	ID             string
+	Name           string
+	Category       string
+	Kind           string
+	Granularity    string
+	MaxDepth       string
+	Carryover      string
+	PromptOverride string
+	Enabled        bool
+}
+
+// Destination is one upstream connection form on /settings/destinations.
+// The secret itself is never part of it, only whether one is saved.
+type Destination struct {
+	Kind        string
+	Label       string
+	Help        string
+	SecretLabel string
+	Connected   bool
+	BaseURL     string
+	HasSecret   bool
 }
 
 // User is the part of the signed-in user the templates need.
@@ -49,19 +79,25 @@ type Renderer struct {
 }
 
 // pages maps a page name to the template file that defines its "content".
-var pageFiles = map[string]string{
-	"login": "login.html",
-	"items": "items.html",
+var pageFiles = map[string][]string{
+	"login":                 {"login.html"},
+	"items":                 {"items.html"},
+	"settings_sources":      {"settings_nav.html", "settings_sources.html"},
+	"settings_destinations": {"settings_nav.html", "settings_destinations.html"},
 }
 
 // New parses the embedded templates. Each page gets its own set so that
 // "content" can be defined once per page alongside the shared base.
 func New() (*Renderer, error) {
 	r := &Renderer{pages: make(map[string]*template.Template, len(pageFiles))}
-	for name, file := range pageFiles {
-		t, err := template.ParseFS(web.FS, "templates/base.html", "templates/"+file)
+	for name, files := range pageFiles {
+		paths := []string{"templates/base.html"}
+		for _, f := range files {
+			paths = append(paths, "templates/"+f)
+		}
+		t, err := template.ParseFS(web.FS, paths...)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", file, err)
+			return nil, fmt.Errorf("parse %s: %w", name, err)
 		}
 		r.pages[name] = t
 	}

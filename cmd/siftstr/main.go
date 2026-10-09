@@ -25,6 +25,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/scheduler"
 	"github.com/Jolls/Siftstr/internal/secret"
 	"github.com/Jolls/Siftstr/internal/server"
+	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/store"
 )
 
@@ -106,15 +107,6 @@ func serve() error {
 		log.Printf("created bootstrap admin %q", strings.ToLower(strings.TrimSpace(cfg.AdminUser)))
 	}
 
-	h, err := server.New(server.Deps{Ready: st.Ping, Auth: a, SecureCookies: cfg.SecureCookies()})
-	if err != nil {
-		return err
-	}
-	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           h,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
 	master, err := secret.Load(cfg.DataDir, cfg.SecretKey)
 	if err != nil {
 		return err
@@ -122,6 +114,17 @@ func serve() error {
 	conns, err := connections.New(st.DB(), secret.Derive(master, "connections"))
 	if err != nil {
 		return err
+	}
+	h, err := server.New(server.Deps{
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), SecureCookies: cfg.SecureCookies(),
+	})
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	// More jobs register here as later phases add them (release, janitor).
 	sched := scheduler.New(enabledUsers(st), nil)

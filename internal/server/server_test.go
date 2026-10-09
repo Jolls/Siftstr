@@ -13,12 +13,15 @@ import (
 	"testing"
 
 	"github.com/Jolls/Siftstr/internal/auth"
+	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/store"
 )
 
 type env struct {
 	srv  *httptest.Server
 	auth *auth.Service
+	st   *store.Store
 }
 
 func setup(t *testing.T, ready func(context.Context) error, secure bool) *env {
@@ -35,13 +38,17 @@ func setup(t *testing.T, ready func(context.Context) error, secure bool) *env {
 	if ready == nil {
 		ready = func(context.Context) error { return nil }
 	}
-	h, err := New(Deps{Ready: ready, Auth: a, SecureCookies: secure})
+	conns, err := connections.New(st.DB(), []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := New(Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), SecureCookies: secure})
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &env{srv: srv, auth: a}
+	return &env{srv: srv, auth: a, st: st}
 }
 
 // client returns an HTTP client with a cookie jar that does not follow redirects.

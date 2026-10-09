@@ -37,3 +37,8 @@
 
 form.inline { margin: 0; }
 form.inline button { margin: 0; width: auto; padding: 0.25rem 0.75rem; }
+
+.subnav ul { padding: 0; }
+.notice { color: var(--pico-ins-color); }
+.source textarea { min-height: 4rem; }
+.destination form.inline { margin-top: 0.5rem; }
