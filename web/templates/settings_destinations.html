@@ -2,6 +2,21 @@
 <h1>Destinations</h1>
 {{template "settingsnav" .}}
 <p>Saved secrets are never shown again. Leave the secret blank to keep the one you saved.</p>
+<form method="post" action="/settings/destinations/keep" class="keep-choice">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <hgroup>
+    <h2>Where kept items go</h2>
+    <p>Kept articles and posts go to Karakeep. Pick where videos and podcast episodes go. A destination needs a connection below.</p>
+  </hgroup>
+  {{range .Keep}}
+  <fieldset>
+    <legend>{{.Label}}</legend>
+    {{$field := .Field}}
+    {{range .Options}}<label><input type="checkbox" name="{{$field}}" value="{{.Kind}}"{{if .Checked}} checked{{end}}> {{.Label}}{{if not .Connected}} (not connected){{end}}</label>{{end}}
+  </fieldset>
+  {{end}}
+  <button type="submit">Save</button>
+</form>
 {{range .Destinations}}
 <article class="destination" id="dest-{{.Kind}}">
   <form method="post" action="/settings/destinations/{{.Kind}}">

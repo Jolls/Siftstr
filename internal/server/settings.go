@@ -14,6 +14,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/ui"
+	"github.com/Jolls/Siftstr/internal/writeback"
 )
 
 // destinationKinds are the connections with a settings form, in display
@@ -134,6 +135,27 @@ func (s *server) renderDestinations(w http.ResponseWriter, req *http.Request, se
 		}
 		p.Destinations = append(p.Destinations, d)
 	}
+	choice, err := s.Dest.Get(req.Context(), sess.User.ID)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	for _, row := range []struct {
+		field, label string
+		picked       []string
+	}{{"video", "Kept videos", choice.Video}, {"podcast", "Kept podcast episodes", choice.Podcast}} {
+		kc := ui.KeepChoice{Field: row.field, Label: row.label}
+		for _, d := range destinationKinds {
+			if !slices.Contains(writeback.VideoCapable, d.Kind) {
+				continue
+			}
+			kc.Options = append(kc.Options, ui.KeepOption{
+				Kind: d.Kind, Label: d.Label, Checked: slices.Contains(row.picked, d.Kind),
+				Connected: slices.ContainsFunc(saved, func(c connections.Connection) bool { return c.Kind == d.Kind }),
+			})
+		}
+		p.Keep = append(p.Keep, kc)
+	}
 	s.ui.Render(w, status, "settings_destinations", p)
 }
 
@@ -153,6 +175,21 @@ func (s *server) existing(req *http.Request, userID, kind string) (connections.C
 		}
 	}
 	return connections.Connection{}, false, nil
+}
+
+// keepSave stores where kept videos and podcasts go. Articles and posts always
+// go to Karakeep, so there is nothing to choose for them.
+func (s *server) keepSave(w http.ResponseWriter, req *http.Request, sess *session) {
+	if err := req.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	err := s.Dest.Set(req.Context(), sess.User.ID, writeback.Choice{Video: req.PostForm["video"], Podcast: req.PostForm["podcast"]})
+	if err != nil {
+		serverError(w)
+		return
+	}
+	http.Redirect(w, req, "/settings/destinations?notice=saved", http.StatusSeeOther)
 }
 
 func (s *server) destinationSave(w http.ResponseWriter, req *http.Request, sess *session) {

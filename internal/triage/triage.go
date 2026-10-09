@@ -76,6 +76,9 @@ type Result struct {
 type Service struct {
 	DB  *sql.DB
 	Now func() time.Time
+	// OnRelease, when set, is called inside ReleaseDue's transaction with the
+	// actions being released. The write-back planner queues their effects here.
+	OnRelease func(ctx context.Context, tx *sql.Tx, userID string, released []Released) error
 }
 
 // New returns a Service using the real clock.
@@ -422,25 +425,60 @@ func (s *Service) record(ctx context.Context, tx *sql.Tx, userID string, a Actio
 	return err
 }
 
+// Released is an action whose hold has ended. Outcome is the state it left
+// its subject in (archived, kept or pending_deep); Prev is the state before.
+type Released struct {
+	ActionID    string
+	SubjectType string
+	SubjectID   string
+	Kind        string
+	Prev        string
+	Outcome     string
+}
+
 // ReleaseDue marks userID's held actions whose hold has ended as released and
-// returns their IDs for the outbox to act on. Held actions live in SQLite, so
-// a restart loses nothing.
+// returns their IDs. When OnRelease is set it runs in the same transaction,
+// so an action is released if and only if its upstream effects were queued;
+// a failure rolls both back and the next tick tries again. Held actions live
+// in SQLite, so a restart loses nothing.
 func (s *Service) ReleaseDue(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`UPDATE actions SET status = 'released' WHERE user_id = ? AND status = 'held' AND release_at <= ? RETURNING action_id`,
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx,
+		`UPDATE actions SET status = 'released' WHERE user_id = ? AND status = 'held' AND release_at <= ?
+		 RETURNING action_id, subject_type, subject_id, kind, COALESCE(prev_state, '')`,
 		userID, stamp(s.Now().UTC()))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var due []string
+	var rel []Released
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var r Released
+		if err := rows.Scan(&r.ActionID, &r.SubjectType, &r.SubjectID, &r.Kind, &r.Prev); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		due = append(due, id)
+		r.Outcome = resultOf(stored{kind: r.Kind, prev: sql.NullString{String: r.Prev, Valid: true}})
+		rel = append(rel, r)
 	}
-	sort.Strings(due)
-	return due, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	sort.Slice(rel, func(i, j int) bool { return rel[i].ActionID < rel[j].ActionID })
+	if s.OnRelease != nil && len(rel) > 0 {
+		if err := s.OnRelease(ctx, tx, userID, rel); err != nil {
+			return nil, fmt.Errorf("queue effects: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	due := make([]string, len(rel))
+	for i, r := range rel {
+		due[i] = r.ActionID
+	}
+	return due, nil
 }

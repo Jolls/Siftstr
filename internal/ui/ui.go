@@ -34,6 +34,23 @@ type Page struct {
 	NewKey       string // a just-created API key, shown once
 	Prompts      []PromptField
 	Destinations []Destination
+	Keep         []KeepChoice
+}
+
+// KeepChoice is one row of the "where kept items go" form: a media type and
+// a checkbox per destination that can take it.
+type KeepChoice struct {
+	Field   string // form field, also the setting
+	Label   string
+	Options []KeepOption
+}
+
+// KeepOption is one destination checkbox.
+type KeepOption struct {
+	Kind      string
+	Label     string
+	Checked   bool
+	Connected bool
 }
 
 // IngestForm holds the user-level ingest settings shown above the source list.

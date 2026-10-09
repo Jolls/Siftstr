@@ -41,6 +41,10 @@ type Service struct {
 	DB    *sql.DB
 	Now   func() time.Time
 	NewID func(prefix string) (string, error) // nil uses random IDs
+	// OnDeep, when set, is called inside Submit's transaction after an item
+	// receives its deep summary. Write-back uses it to send a promoted item
+	// to Karakeep, which waits for that summary.
+	OnDeep func(ctx context.Context, tx *sql.Tx, userID, itemID string) error
 }
 
 // New returns a Service using the real clock.
@@ -487,6 +491,11 @@ func (s *Service) Submit(ctx context.Context, userID, runID string, in []Summary
 				   AND id IN (SELECT subject_id FROM run_items WHERE run_id = ? AND user_id = ?)`,
 				today, now, sm.ID, userID, runID, userID); err != nil {
 				return res, err
+			}
+		}
+		if sm.Stage == "deep" && s.OnDeep != nil {
+			if err := s.OnDeep(ctx, tx, userID, sm.ID); err != nil {
+				return res, fmt.Errorf("queue deep save: %w", err)
 			}
 		}
 		res.Accepted++
