@@ -103,7 +103,7 @@ func TestUpdateKeepsReplacesAndClearsSecret(t *testing.T) {
 	e := setup(t)
 	c, _ := e.svc.Create(ctx, "u1", Input{Kind: "miniflux", BaseURL: "https://a.example.com", Secret: str("one")})
 
-	c, err := e.svc.Update(ctx, "u1", c.ID, Input{BaseURL: "https://b.example.com", Config: json.RawMessage(`{"category":"news"}`)})
+	c, err := e.svc.Update(ctx, "u1", c.ID, UpdateInput{BaseURL: str("https://b.example.com"), Config: json.RawMessage(`{"category":"news"}`)})
 	if err != nil || c.BaseURL != "https://b.example.com" || !c.HasSecret {
 		t.Fatalf("keep: %+v %v", c, err)
 	}
@@ -111,12 +111,12 @@ func TestUpdateKeepsReplacesAndClearsSecret(t *testing.T) {
 		t.Fatalf("secret changed when Secret was nil: %q", s)
 	}
 
-	c, _ = e.svc.Update(ctx, "u1", c.ID, Input{BaseURL: c.BaseURL, Secret: str("two")})
+	c, _ = e.svc.Update(ctx, "u1", c.ID, UpdateInput{Secret: str("two")})
 	if s, _ := e.svc.Secret(ctx, "u1", c.ID); s != "two" {
 		t.Fatalf("replace: %q", s)
 	}
 
-	c, _ = e.svc.Update(ctx, "u1", c.ID, Input{BaseURL: c.BaseURL, Secret: str("")})
+	c, _ = e.svc.Update(ctx, "u1", c.ID, UpdateInput{ClearSecret: true})
 	if c.HasSecret {
 		t.Fatal("clear left HasSecret set")
 	}
@@ -138,7 +138,7 @@ func TestConnectionsAreIsolatedBetweenUsers(t *testing.T) {
 	if _, err := e.svc.Secret(ctx, "u2", c.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Secret: %v", err)
 	}
-	if _, err := e.svc.Update(ctx, "u2", c.ID, Input{Secret: str("hijacked")}); !errors.Is(err, ErrNotFound) {
+	if _, err := e.svc.Update(ctx, "u2", c.ID, UpdateInput{Secret: str("hijacked")}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Update: %v", err)
 	}
 	if err := e.svc.Delete(ctx, "u2", c.ID); !errors.Is(err, ErrNotFound) {
@@ -194,6 +194,10 @@ func TestValidation(t *testing.T) {
 		"ftp url":      {Kind: "miniflux", BaseURL: "ftp://x.example.com"},
 		"array config": {Kind: "miniflux", Config: json.RawMessage(`[1]`)},
 		"junk config":  {Kind: "miniflux", Config: json.RawMessage(`{`)},
+		"userinfo url": {Kind: "miniflux", BaseURL: "https://admin:pw@x.example.com"},
+		"query url":    {Kind: "miniflux", BaseURL: "https://x.example.com/?token=1"},
+		"nostr http":   {Kind: "nostr", BaseURL: "https://relay.example.com"},
+		"ws miniflux":  {Kind: "miniflux", BaseURL: "wss://x.example.com"},
 	} {
 		if _, err := e.svc.Create(ctx, "u1", in); err == nil {
 			t.Errorf("%s accepted", name)
@@ -201,6 +205,25 @@ func TestValidation(t *testing.T) {
 	}
 	if _, err := New(e.st.DB(), []byte("short")); err == nil {
 		t.Error("short key accepted")
+	}
+	if _, err := New(e.st.DB(), make([]byte, 16)); err == nil {
+		t.Error("16-byte key accepted")
+	}
+	if _, err := e.svc.Create(ctx, "u1", Input{Kind: "nostr", BaseURL: "wss://relay.example.com"}); err != nil {
+		t.Errorf("nostr wss rejected: %v", err)
+	}
+}
+
+func TestPartialUpdateKeepsOtherFields(t *testing.T) {
+	ctx := context.Background()
+	e := setup(t)
+	c, _ := e.svc.Create(ctx, "u1", Input{Kind: "miniflux", BaseURL: "https://a.example.com", Secret: str("one"), Config: json.RawMessage(`{"category":"news"}`)})
+	c, err := e.svc.Update(ctx, "u1", c.ID, UpdateInput{Secret: str("")}) // blank form field
+	if err != nil || c.BaseURL != "https://a.example.com" || string(c.Config) != `{"category":"news"}` || !c.HasSecret {
+		t.Fatalf("partial update lost data: %+v %v", c, err)
+	}
+	if s, _ := e.svc.Secret(ctx, "u1", c.ID); s != "one" {
+		t.Fatalf("blank secret changed it: %q", s)
 	}
 }
 

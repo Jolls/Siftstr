@@ -19,7 +19,11 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strings"
 )
+
+// kindSchemes lists the URL schemes of kinds that don't use http(s).
+var kindSchemes = map[string][]string{"nostr": {"ws", "wss"}}
 
 // Kinds are the upstream types a connection can have (see migration 001).
 var Kinds = []string{"miniflux", "karakeep", "metube", "youtube", "nextcloud", "nostr"}
@@ -43,12 +47,23 @@ type Connection struct {
 	HasSecret bool
 }
 
-// Input is what a user submits. For Update, a nil Secret keeps the saved one.
+// Input is what a user submits to Create.
 type Input struct {
-	Kind    string // Create only; a connection's kind never changes
+	Kind    string
 	BaseURL string
 	Secret  *string
 	Config  json.RawMessage // optional; defaults to {}
+}
+
+// UpdateInput is a partial update: a nil field keeps the saved value. A
+// connection's kind never changes. An empty Secret also keeps the saved one,
+// so a blank password field in a form cannot wipe a credential; use
+// ClearSecret to remove it on purpose. ClearSecret wins over Secret.
+type UpdateInput struct {
+	BaseURL     *string
+	Config      json.RawMessage
+	Secret      *string
+	ClearSecret bool
 }
 
 // Service reads and writes connections.
@@ -59,6 +74,9 @@ type Service struct {
 
 // New returns a Service. key must be 32 bytes (see secret.Derive).
 func New(db *sql.DB, key []byte) (*Service, error) {
+	if len(key) != 32 {
+		return nil, fmt.Errorf("connections key must be 32 bytes, got %d", len(key))
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("connections key: %w", err)
@@ -94,13 +112,27 @@ func (s *Service) open(userID, id string, blob []byte) (string, error) {
 	return string(plain), nil
 }
 
-func validate(baseURL string, config json.RawMessage) (json.RawMessage, error) {
-	if baseURL != "" {
-		u, err := url.Parse(baseURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return nil, errors.New("base URL must be an http(s) URL")
-		}
+func validateURL(kind, baseURL string) error {
+	if baseURL == "" {
+		return nil
 	}
+	schemes := kindSchemes[kind]
+	if schemes == nil {
+		schemes = []string{"http", "https"}
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || !slices.Contains(schemes, u.Scheme) || u.Host == "" {
+		return fmt.Errorf("base URL must be a %s URL", strings.Join(schemes, "/"))
+	}
+	// Credentials belong in the encrypted secret, not in a column that Get and
+	// List return as-is.
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("base URL must not contain credentials, a query string or a fragment")
+	}
+	return nil
+}
+
+func validateConfig(config json.RawMessage) (json.RawMessage, error) {
 	if len(config) == 0 {
 		return json.RawMessage("{}"), nil
 	}
@@ -124,7 +156,10 @@ func (s *Service) Create(ctx context.Context, userID string, in Input) (Connecti
 	if !slices.Contains(Kinds, in.Kind) {
 		return Connection{}, fmt.Errorf("unknown connection kind %q", in.Kind)
 	}
-	cfg, err := validate(in.BaseURL, in.Config)
+	if err := validateURL(in.Kind, in.BaseURL); err != nil {
+		return Connection{}, err
+	}
+	cfg, err := validateConfig(in.Config)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -147,41 +182,46 @@ func (s *Service) Create(ctx context.Context, userID string, in Input) (Connecti
 	return Connection{ID: id, Kind: in.Kind, BaseURL: in.BaseURL, Config: cfg, HasSecret: blob != nil}, nil
 }
 
-// Update changes a connection's URL, config and, if Secret is non-nil, its
-// secret. An empty non-nil Secret clears it.
-func (s *Service) Update(ctx context.Context, userID, id string, in Input) (Connection, error) {
-	cfg, err := validate(in.BaseURL, in.Config)
-	if err != nil {
-		return Connection{}, err
-	}
+// Update applies a partial update to one of userID's connections.
+func (s *Service) Update(ctx context.Context, userID, id string, in UpdateInput) (Connection, error) {
 	cur, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return Connection{}, err
 	}
-	var res sql.Result
-	if in.Secret == nil {
-		res, err = s.db.ExecContext(ctx,
-			`UPDATE connections SET base_url = ?, config_json = ? WHERE id = ? AND user_id = ?`,
-			in.BaseURL, string(cfg), id, userID)
-	} else {
-		var blob []byte
-		if *in.Secret != "" {
-			if blob, err = s.seal(userID, id, *in.Secret); err != nil {
-				return Connection{}, err
-			}
+	if in.BaseURL != nil {
+		if err := validateURL(cur.Kind, *in.BaseURL); err != nil {
+			return Connection{}, err
 		}
-		res, err = s.db.ExecContext(ctx,
-			`UPDATE connections SET base_url = ?, config_json = ?, secret_enc = ? WHERE id = ? AND user_id = ?`,
-			in.BaseURL, string(cfg), blob, id, userID)
-		cur.HasSecret = blob != nil
+		cur.BaseURL = *in.BaseURL
 	}
+	if in.Config != nil {
+		if cur.Config, err = validateConfig(in.Config); err != nil {
+			return Connection{}, err
+		}
+	}
+	set, args := "base_url = ?, config_json = ?", []any{cur.BaseURL, string(cur.Config)}
+	switch {
+	case in.ClearSecret:
+		set += ", secret_enc = NULL"
+		cur.HasSecret = false
+	case in.Secret != nil && *in.Secret != "":
+		blob, err := s.seal(userID, id, *in.Secret)
+		if err != nil {
+			return Connection{}, err
+		}
+		set += ", secret_enc = ?"
+		args = append(args, blob)
+		cur.HasSecret = true
+	}
+	args = append(args, id, userID)
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE connections SET "+set+" WHERE id = ? AND user_id = ?", args...)
 	if err != nil {
 		return Connection{}, fmt.Errorf("update connection: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return Connection{}, ErrNotFound
 	}
-	cur.BaseURL, cur.Config = in.BaseURL, cfg
 	return cur, nil
 }
 
