@@ -1,0 +1,63 @@
+{
+  "sources": [
+    { "key": "blog", "name": "Example Blog", "category": "Tech" },
+    { "key": "short", "name": "Example Headlines", "category": "News", "max_depth": "light", "carryover": "drop" },
+    { "key": "video", "name": "Example Channel", "category": "Video" }
+  ],
+  "items": [
+    {
+      "source": "blog",
+      "title": "A long article about building small tools",
+      "url": "https://example.com/blog/small-tools",
+      "excerpt": "Small tools age better than frameworks.",
+      "light_summary": "Argues that small single-purpose tools outlast large frameworks, with three examples and a short checklist for deciding when to build one."
+    },
+    {
+      "source": "blog",
+      "title": "Release notes you will actually read",
+      "url": "https://example.com/blog/release-notes",
+      "light_summary": "A short piece on writing release notes around what changed for the reader instead of what changed in the code."
+    },
+    {
+      "source": "blog",
+      "title": "Why the deep summary matters",
+      "url": "https://example.com/blog/deep-summary",
+      "light_summary": "A comparison of two caching strategies.",
+      "deep_summary": "Full walk-through of both caching strategies with their failure modes. The write-through approach is simpler but couples latency to the slowest store; the write-behind approach hides latency but needs a recovery path after a crash. The author recommends write-through until measurements say otherwise."
+    },
+    {
+      "source": "blog",
+      "title": "An older piece that is still waiting",
+      "url": "https://example.com/blog/older",
+      "light_summary": "Carried over from two days ago because nobody triaged it.",
+      "days_ago": 2
+    },
+    {
+      "source": "short",
+      "title": "Headline one",
+      "url": "https://example.com/news/one",
+      "light_summary": "One-line summary for a source that only supports light summaries, so promote is unavailable."
+    },
+    {
+      "source": "short",
+      "title": "Headline two",
+      "url": "https://example.com/news/two",
+      "light_summary": "Another light-only item."
+    },
+    {
+      "source": "video",
+      "title": "A 20 minute talk on state machines",
+      "url": "https://example.com/watch/state-machines",
+      "media_type": "video",
+      "light_summary": "Talk walking through modelling UI flows as explicit state machines, with a live refactor of a checkout form."
+    },
+    {
+      "source": "video",
+      "title": "Episode 41: interview with a maintainer",
+      "url": "https://example.com/podcast/41",
+      "media_type": "podcast",
+      "light_summary": "Maintainer discusses burnout, funding, and how they decide what to leave unmerged.",
+      "days_ago": 1
+    }
+  ]
+}
