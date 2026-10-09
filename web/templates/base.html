@@ -18,6 +18,12 @@
         <li><a href="/backlog"{{if eq .Active "backlog"}} aria-current="page"{{end}}>Backlog</a></li>
         <li><a href="/read"{{if eq .Active "read"}} aria-current="page"{{end}}>Read</a></li>
         <li><a href="/settings/sources"{{if eq .Active "settings"}} aria-current="page"{{end}}>Settings</a></li>
+        <li>
+          <form method="post" action="/logout" class="inline">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <button type="submit" class="secondary outline">Sign out</button>
+          </form>
+        </li>
       </ul>
       {{end}}
     </nav>

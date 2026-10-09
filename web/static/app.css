@@ -34,3 +34,6 @@
   .item:focus { outline: 2px solid var(--pico-primary); outline-offset: -2px; }
   .item .controls { padding: 0; margin: 0; background: none; border: 0; }
 }
+
+form.inline { margin: 0; }
+form.inline button { margin: 0; width: auto; padding: 0.25rem 0.75rem; }

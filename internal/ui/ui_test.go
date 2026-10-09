@@ -63,7 +63,7 @@ func TestItemBadgeAndControls(t *testing.T) {
 	if strings.Count(body, `data-action="promote"`) != 1 {
 		t.Error("promote button should appear only where CanPromote is set")
 	}
-	if strings.Contains(body, "<form") {
+	if i := strings.Index(body, `<section class="items"`); i < 0 || strings.Contains(body[i:], "<form") {
 		t.Error("triage controls must not be forms or direct requests")
 	}
 }
