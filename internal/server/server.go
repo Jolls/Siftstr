@@ -20,6 +20,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/triage"
 	"github.com/Jolls/Siftstr/internal/ui"
+	"github.com/Jolls/Siftstr/internal/writeback"
 )
 
 const (
@@ -38,6 +39,7 @@ type Deps struct {
 	Sources *sources.Service
 	Runs    *runs.Service
 	Triage  *triage.Service
+	Dest    *writeback.Settings // where kept videos and podcasts go
 	// SecureCookies sets the Secure flag. It comes from SIFTSTR_BASE_URL, not
 	// from r.TLS, because TLS ends at the reverse proxy.
 	SecureCookies bool
@@ -94,6 +96,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("POST /settings/keys", s.protected(s.keyCreate))
 	mux.HandleFunc("POST /settings/keys/{id}/revoke", s.protected(s.keyRevoke))
 	mux.HandleFunc("GET /settings/destinations", s.protected(s.destinationsForm))
+	mux.HandleFunc("POST /settings/destinations/keep", s.protected(s.keepSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}/delete", s.protected(s.destinationDelete))
 	return secureHeaders(mux), nil

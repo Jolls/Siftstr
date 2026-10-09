@@ -195,3 +195,30 @@ func TestIngestSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestKeepDestinationsSaveAndIsolation(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	c2, _ := e.signedIn(t, "bob")
+	_, body := e.get(t, c, "/settings/destinations")
+	// Defaults: video goes to every capable destination, podcasts to Karakeep.
+	if strings.Count(body, " checked>") != 3 {
+		t.Fatalf("defaults: want 3 checked boxes\n%s", body)
+	}
+	v := url.Values{"csrf": {csrf}, "video": {"metube"}}
+	if resp := e.post(t, c, "/settings/destinations/keep", v); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	_, body = e.get(t, c, "/settings/destinations")
+	if strings.Count(body, " checked>") != 1 || !strings.Contains(body, `name="video" value="metube" checked>`) {
+		t.Fatalf("saved choice not shown\n%s", body)
+	}
+	_, body = e.get(t, c2, "/settings/destinations")
+	if strings.Count(body, " checked>") != 3 {
+		t.Fatal("alice's choice leaked to bob")
+	}
+	// Without CSRF the save is refused.
+	if resp := e.post(t, c, "/settings/destinations/keep", url.Values{"video": {"karakeep"}}); resp.StatusCode == http.StatusSeeOther {
+		t.Fatal("saved without csrf")
+	}
+}

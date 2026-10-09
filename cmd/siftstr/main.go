@@ -22,7 +22,12 @@ import (
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/config"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/dest"
+	"github.com/Jolls/Siftstr/internal/dest/karakeep"
+	"github.com/Jolls/Siftstr/internal/dest/metube"
+	destminiflux "github.com/Jolls/Siftstr/internal/dest/miniflux"
 	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
+	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/scheduler"
 	"github.com/Jolls/Siftstr/internal/secret"
@@ -30,6 +35,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/store"
 	"github.com/Jolls/Siftstr/internal/triage"
+	"github.com/Jolls/Siftstr/internal/writeback"
 )
 
 const usage = `usage:
@@ -119,8 +125,16 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	// Write-back: releasing a held action queues its upstream effects in the
+	// same transaction, and a deep summary queues a promoted item's Karakeep
+	// save. The outbox job below sends them.
+	planner := writeback.NewPlanner()
+	tr := triage.New(st.DB())
+	tr.OnRelease = planner.OnRelease
+	rn := runs.New(st.DB())
+	rn.OnDeep = planner.OnDeep
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), SecureCookies: cfg.SecureCookies(),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, SecureCookies: cfg.SecureCookies(),
 	})
 	if err != nil {
 		return err
@@ -148,13 +162,30 @@ func serve() error {
 	}); err != nil {
 		return err
 	}
-	tr := triage.New(st.DB())
 	if err := sched.Register(scheduler.Job{
-		// Marks actions whose undo hold has ended as released. The outbox
-		// picks them up from here once the write-back phase lands.
+		// Marks actions whose undo hold has ended as released and queues their
+		// upstream effects in the outbox.
 		Name: "release-actions", Interval: time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
 		Run: func(ctx context.Context, userID string) error {
 			_, err := tr.ReleaseDue(ctx, userID)
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	sender := &writeback.Sender{Conns: conns, Factories: map[string]dest.Factory{
+		writeback.Miniflux: destminiflux.Factory,
+		writeback.Karakeep: karakeep.Factory,
+		writeback.MeTube:   metube.Factory,
+	}}
+	ob := &outbox.Runner{DB: st.DB(), Handle: sender.Handle, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		Name: "outbox", Interval: 30 * time.Second, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := ob.Run(ctx, userID)
+			if res.Done > 0 || res.Failed > 0 || res.Retried > 0 {
+				log.Printf("outbox: %d sent, %d retrying, %d failed", res.Done, res.Retried, res.Failed)
+			}
 			return err
 		},
 	}); err != nil {

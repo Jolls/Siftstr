@@ -40,7 +40,7 @@ Siftstr is **not** a reader. Kept items go to tools that handle the actual consu
   Miniflux ---- pull (timer) ---->  +--------------+  ---- mark read ------------> Miniflux
   Nostr relays - subscribe ------>  |   Siftstr    |  ---- bookmark + summary ---> Karakeep
                                     |  Go + HTMX   |  ---- download trigger -----> MeTube
-                                    |   SQLite     |  ---- Watch Later (?) ------> YouTube
+                                    |   SQLite     |
                                     +------^-------+  ---- daily .md briefing ---> Nextcloud / Obsidian
                                            | swipes sent as they happen;
                                            | queued in the page if connection drops
@@ -99,7 +99,7 @@ In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped
 | Briefing builder | Once summaries arrive, assembles the day's briefing (Today + Backlog) and writes the markdown file |
 | Action log and triage service | Stores incoming actions idempotently, runs the item state machine, handles undo by cancelling held effects |
 | Write-back outbox | Holds each action's upstream effects for the grace period, then sends them, with retry |
-| Destination adapters | Miniflux, Karakeep, MeTube, YouTube, behind a common interface |
+| Destination adapters | Miniflux, Karakeep, MeTube, behind a common interface |
 | Janitor | Deletes workflow data older than 6 months |
 
 **Client (browser):**
@@ -200,19 +200,30 @@ The server **stores** an action in SQLite as soon as it arrives, so the badge st
 
 ### Write-back (server to upstream)
 
-When the hold ends, a timer releases the held effects into the **outbox**. Workers are idempotent (for example, check whether the bookmark already exists before creating it) and retry on failure. A kept video therefore reaches MeTube about 15 minutes after the swipe reaches the server, not the next day.
+When the hold ends, a timer releases the held actions, and in the same transaction their effects are queued in the **outbox** (a failure rolls both back, so an action is released only if its effects were queued). A second timer (every 30 seconds) sends due outbox entries. A kept video therefore reaches MeTube about 15 minutes after the swipe reaches the server, not the next day.
 
-| Outcome | Miniflux | Karakeep | Video destinations (multi-select) | YouTube |
-|---|---|---|---|---|
-| archive | mark read | none | none | none |
-| promote | mark read *(proposed; see open questions)* | Create bookmark, **archived**, tagged `sifted`, with the deep summary in the bookmark summary field. This waits until the deep summary exists (next morning run). | none | none |
-| keep: article / post | mark read | Create bookmark with summary | n/a | n/a |
-| keep: video | mark read | If Karakeep is a selected destination: link, title, and summary (no file) | e.g. MeTube download | Watch Later add *(feasibility in doubt)* |
-| keep: podcast | mark read | Create bookmark with summary | ? | n/a |
+Each entry is a snapshot of what to send (URL, title, summary, tags, Miniflux entry IDs), taken when it is queued, plus the connection to send it through. Entries are de-duplicated by key (`<destination>:<action id>`), so releasing or replaying twice queues nothing new. Workers are idempotent, so an entry sent twice (a crash after the send, before the "done" mark) changes nothing upstream:
 
-Nostr items have no upstream read state, so archive is a local-only change.
+- **Miniflux:** marking an entry read twice is a no-op.
+- **Karakeep:** creating a link bookmark is de-duplicated by Karakeep itself (by URL), after which Siftstr sets the wanted summary and archived flag and attaches tags; every step sets a desired state. A text note (a digest) has no URL, so it carries a `siftstr:<id>` marker in its note field and Siftstr searches for that before creating. This relies on Karakeep's search index being up to date; if it lags, a retry could create a second note.
+- **MeTube:** `GET /history` is checked for the URL (queued, pending or done) before `POST /add`.
 
-MeTube is a plain URL downloader with no YouTube account behind it, so it can't do likes, history, or playlists. Anything account-related (Watch Later) has to go through the YouTube Data API, and YouTube watch history isn't available through the API at all.
+Failures retry with exponential backoff (1 minute, doubling, capped at 6 hours) up to 10 attempts, then the entry is marked `failed` and keeps its `last_error`. Only a 400 or 422 reply, an item with no URL, or a connection that was removed fails at once; a rejected credential or a server that is down retries, so fixing the token in Settings lets the entry through. Error text never includes a reply body or a secret.
+
+| Outcome | Miniflux | Karakeep | Video and podcast destinations (multi-select) |
+|---|---|---|---|
+| archive | mark read | none | none |
+| promote | mark read, when the hold ends | Create bookmark, **archived**, tagged `sifted` and `promoted`, with the deep summary in the bookmark summary field. This waits until the deep summary exists (the next morning run submits it); whichever of the two happens second queues it. | none |
+| keep: article / post | mark read | Create bookmark, not archived, tagged `sifted` and `kept`, with the summary | n/a |
+| keep: video | mark read | If selected (default: yes): link, title, and summary (no file) | Selected destinations, e.g. MeTube download |
+| keep: podcast | mark read | If selected (default: yes): bookmark with summary | Selected destinations |
+| keep after promote | mark read | The same bookmark is updated: unarchived, `kept` tag added | as for keep |
+
+The summary written is the deep summary if there is one, else the light one. It replaces Karakeep's own summary for that bookmark; Karakeep's own AI tagging is left alone and Siftstr only adds its tags. Digests: archive marks the children read; keep saves a text note (the digest summary) to Karakeep and marks the children read. Nostr items have no upstream read state, so archive is a local-only change and nothing is sent to Miniflux for them. A destination the user has not connected is skipped, and the action is still released.
+
+**Which destinations a kept video or podcast goes to** is a per-user multi-select on the destinations page (`user_settings` keys `video_destinations` and `podcast_destinations`, comma-separated kinds). Unset, a video goes to every connected destination that can take one (Karakeep and MeTube) and a podcast to Karakeep. Articles and posts always go to Karakeep.
+
+MeTube is a plain URL downloader with no YouTube account behind it, so it can't do likes, history, or playlists. YouTube account features (Watch Later, likes, history) are not in v1 (see Q8).
 
 **Video destinations** are a multi-select setting, e.g. Karakeep (permanent log) **and** MeTube (transient download). They are implemented behind one interface so other users can add their own:
 
@@ -333,7 +344,8 @@ actions        action_id (client UUID, PK), user_id, subject_type[item|digest],
                status[held|released|cancelled|rejected]
 
 outbox         id, user_id, action_id, connection_id, op, payload, status,
-               attempts, last_error, created_at, done_at
+               attempts, last_error, created_at, done_at,
+               next_attempt_at, dedupe_key  -- UNIQUE(user_id, dedupe_key)
 
 runs           id, user_id, started_at, summaries_at, finished_at, stats
 
@@ -483,10 +495,10 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 5. ~~**Digest actions.**~~ **Decided (2026-10-09):** archive marks all children read; keep saves the digest to Karakeep as a note and marks the children read; promote is disabled.
 6. ~~**Light-only sources** (`max_depth = light`).~~ **Decided (2026-10-09):** promote is disabled for these items (the UI reads the source setting; no source-type special case).
 7. **Karakeep as a source:** what would be pulled from it, and how would that avoid a loop with Karakeep as a destination? Or should it be dropped as a source?
-8. **YouTube Watch Later:** Google restricted API access to the Watch Later playlist years ago, so adding to it may not be possible. A user-owned playlist could be the fallback. It also needs OAuth for a self-hosted single user. **Verify before designing around it.**
-9. **Karakeep summary field:** confirm the API can set a bookmark's summary and tags on create or update. Decide whether Siftstr's summary replaces or supplements Karakeep's own AI tagging and summary.
-10. **Promote and Miniflux read state:** mark read when promoted, or only at the final outcome?
-11. **Podcast keep destination:** Karakeep only, or something else (e.g. a podcast app)?
+8. ~~**YouTube Watch Later.**~~ **Decided (2026-10-09):** dropped from v1. Google closed the Watch Later playlist to API writes years ago, and a self-hosted instance would also need OAuth. A user-owned playlist is a roadmap item. There is no `youtube` destination in v1, so no YouTube column in the write-back table.
+9. ~~**Karakeep summary field.**~~ **Decided (2026-10-09):** Karakeep's bookmark create and update accept a `summary` field (checked against its schema in the Karakeep source), and tags are attached with a separate call. Siftstr's summary replaces Karakeep's summary for the bookmark; Karakeep's AI tagging stays on and Siftstr only adds its own tags (`sifted`, plus `promoted` or `kept`).
+10. ~~**Promote and Miniflux read state.**~~ **Decided (2026-10-09):** mark read when the promote's hold ends. The entry leaves the user's Miniflux unread list then, and the deep summary and Karakeep save follow later.
+11. ~~**Podcast keep destination.**~~ **Decided (2026-10-09):** Karakeep by default, plus a per-user multi-select like video's so other destinations can be added later through the `Destination` interface. No second podcast adapter in v1.
 12. **Markdown export target:** a mounted volume that Nextcloud syncs, or a WebDAV upload? Also need the file name pattern and template.
 13. ~~**Network reachability.**~~ **Decided (2026-10-09):** the user gives Siftstr the address the scheduled task will use, in `SIFTSTR_BASE_URL`. It can be a local address with a port (`http://192.168.1.20:8080`) or an external IP or domain, and which one is the operator's call. Siftstr builds the work package's absolute URLs from it and does not check how reachable it is. The `Secure` cookie flag is set only when the URL is `https://`. The README should describe the common setups (LAN, VPN, reverse proxy, tunnel) without recommending one.
 14. **Nostr configuration:** relays, followed npubs, hashtags/topics. How does the firehose case map onto `digest`?
