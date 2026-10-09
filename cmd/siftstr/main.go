@@ -17,11 +17,13 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	_ "time/tzdata" // zone data inside the binary; the runtime image has none
 
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/config"
 	"github.com/Jolls/Siftstr/internal/connections"
 	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
+	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/scheduler"
 	"github.com/Jolls/Siftstr/internal/secret"
 	"github.com/Jolls/Siftstr/internal/server"
@@ -86,6 +88,7 @@ func open(ctx context.Context) (config.Config, *store.Store, *auth.Service, erro
 		_ = st.Close()
 		return cfg, nil, nil, err
 	}
+	a.SetDefaultTimezone(cfg.Timezone)
 	return cfg, st, a, nil
 }
 
@@ -116,7 +119,7 @@ func serve() error {
 		return err
 	}
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), SecureCookies: cfg.SecureCookies(),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), SecureCookies: cfg.SecureCookies(),
 	})
 	if err != nil {
 		return err

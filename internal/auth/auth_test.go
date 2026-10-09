@@ -200,3 +200,18 @@ func TestCSRF(t *testing.T) {
 		t.Error("empty values accepted")
 	}
 }
+
+func TestNewUsersGetTheConfiguredDefaultTimezone(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	s.SetDefaultTimezone("Europe/Berlin")
+	u, err := s.CreateUser(ctx, "berta", "correct horse battery", RoleUser)
+	if err != nil || u.Timezone != "Europe/Berlin" {
+		t.Fatalf("user = %+v, %v", u, err)
+	}
+	s.SetDefaultTimezone("Not/AZone") // ignored: the previous default stays
+	u, _ = s.CreateUser(ctx, "carl", "correct horse battery", RoleUser)
+	if u.Timezone != "Europe/Berlin" {
+		t.Fatalf("typo replaced the default: %s", u.Timezone)
+	}
+}

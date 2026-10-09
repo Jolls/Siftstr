@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Jolls/Siftstr/internal/ids"
 )
 
 // KeyPrefix starts every API key, so leaked keys are easy to spot and scan for.
@@ -45,7 +47,7 @@ func (s *Service) CreateAPIKey(ctx context.Context, userID, label string) (APIKe
 		return APIKey{}, "", err
 	}
 	secret = KeyPrefix + secret
-	id, err := newID("key_")
+	id, err := ids.New("key_")
 	if err != nil {
 		return APIKey{}, "", err
 	}

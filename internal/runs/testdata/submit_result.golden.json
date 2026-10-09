@@ -1,0 +1,25 @@
+{
+  "accepted": 3,
+  "skipped": [
+    {
+      "id": "itm_x",
+      "reason": "not part of this run"
+    },
+    {
+      "id": "itm_a",
+      "reason": "not waiting for a deep summary"
+    },
+    {
+      "id": "itm_nope",
+      "reason": "not part of this run"
+    },
+    {
+      "id": "itm_a",
+      "reason": "empty summary"
+    },
+    {
+      "id": "itm_a",
+      "reason": "unknown stage \"weird\""
+    }
+  ]
+}

@@ -151,7 +151,17 @@ func (s *Service) Ingest(ctx context.Context, userID string) (IngestSettings, er
 			out.MaxAgeDays = n
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	// A stored value outside the valid range falls back to the default.
+	if out.ExcerptLength < 1 {
+		out.ExcerptLength = DefaultExcerptLength
+	}
+	if out.MaxAgeDays < 0 {
+		out.MaxAgeDays = DefaultMaxAgeDays
+	}
+	return out, nil
 }
 
 // SetIngest saves userID's ingest settings.
@@ -159,12 +169,17 @@ func (s *Service) SetIngest(ctx context.Context, userID string, in IngestSetting
 	if err := in.Validate(); err != nil {
 		return err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	for k, v := range map[string]int{"excerpt_length": in.ExcerptLength, "max_age_days": in.MaxAgeDays} {
-		if _, err := s.db.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
 			 ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`, userID, k, strconv.Itoa(v)); err != nil {
 			return fmt.Errorf("save setting %s: %w", k, err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }

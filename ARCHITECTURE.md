@@ -263,7 +263,7 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 
 ## 9. Claude contract (draft)
 
-The scheduled-task prompt should stay thin and stable. All variable instructions (the user's global prompt and per-source overrides) are **served by the app inside the work package**. The API key determines which user's work is returned. The full spec belongs in `docs/API.md` (to do). Sketch:
+The scheduled-task prompt should stay thin and stable. All variable instructions (the user's global prompt and per-source overrides) are **served by the app inside the work package**. The API key determines which user's work is returned. The full spec is in [docs/API.md](docs/API.md) and the task prompt is in [docs/scheduled-task.md](docs/scheduled-task.md). Sketch:
 
 ```jsonc
 // POST /api/v1/runs  ->  201
@@ -446,7 +446,7 @@ Everything that must survive a restart lives under `/data`, so a single named vo
 |---|---|---|
 | `SIFTSTR_LISTEN` | `:8080` | Listen address |
 | `SIFTSTR_DATA_DIR` | `/data` | Database, key, and default export location |
-| `SIFTSTR_BASE_URL` | none | Public `https://` URL, used for absolute links and the `Secure` cookie flag |
+| `SIFTSTR_BASE_URL` | none | URL the Claude task and browsers use to reach Siftstr: a local `http://host:port`, an IP, or a public `https://` domain. Used for absolute links; `Secure` cookies only when it is `https://` |
 | `SIFTSTR_SECRET_KEY` | auto-generated file | Encryption key for `connections` secrets |
 | `SIFTSTR_ADMIN_USER` / `SIFTSTR_ADMIN_PASSWORD` | none | Bootstrap admin on first start |
 | `TZ` | `UTC` | Default timezone for new users |
@@ -481,9 +481,9 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 10. **Promote and Miniflux read state:** mark read when promoted, or only at the final outcome?
 11. **Podcast keep destination:** Karakeep only, or something else (e.g. a podcast app)?
 12. **Markdown export target:** a mounted volume that Nextcloud syncs, or a WebDAV upload? Also need the file name pattern and template.
-13. **Network reachability:** where does the Cowork scheduled task run, and how does it reach a self-hosted instance (LAN, VPN, Tor, or a public domain)? The README should describe the options.
+13. ~~**Network reachability.**~~ **Decided (2026-10-09):** the user gives Siftstr the address the scheduled task will use, in `SIFTSTR_BASE_URL`. It can be a local address with a port (`http://192.168.1.20:8080`) or an external IP or domain, and which one is the operator's call. Siftstr builds the work package's absolute URLs from it and does not check how reachable it is. The `Secure` cookie flag is set only when the URL is `https://`. The README should describe the common setups (LAN, VPN, reverse proxy, tunnel) without recommending one.
 14. **Nostr configuration:** relays, followed npubs, hashtags/topics. How does the firehose case map onto `digest`?
-15. **Day boundaries:** the morning run is the boundary. What timezone, and what happens if the run fails or is skipped for a day? *(Proposed: the previous briefing stays current, and the next run picks up everything.)*
+15. ~~**Day boundaries.**~~ **Decided (2026-10-09):** the timezone is a per-user setting (`users.timezone`, defaulting to `TZ` for new users). Everything stored in the database is UTC, and times are converted to the user's timezone only at the edges: when deciding which day a morning run belongs to, and when rendering. If a run fails or is skipped, nothing changes: pending items stay pending, the previous briefing stays current, and the next run summarizes everything still waiting. Carryover is applied at the start of that run, so a missed day does not expire items early.
 16. **Janitor and Backlog:** should items still untriaged in Backlog after 6 months be deleted silently?
 17. ~~**Single vs. multi-user.**~~ **Decided:** the architecture and data model are multi-user from day one. v1 runs with one bootstrapped user, and user management features are on the [roadmap](ROADMAP.md).
 18. ~~**Prior art.**~~ **Decided (2026-10-09):** a web search found no project that combines Miniflux and Nostr ingest, a once-a-day Claude summary, and archive/promote/keep triage with write-back. The closest is **CondenseIt** (`wildlifechorus/condenseit`, MIT), an all-in-one digest reader: it fetches its own sources, calls an LLM itself (Ollama, OpenRouter, or an OpenAI-compatible endpoint), and ranks items from learned preferences, but has no Nostr support and no write-back. Siftstr is the integrating alternative: Miniflux and Nostr stay the system of record, decisions write back through the outbox to Karakeep, MeTube and Miniflux, and the only LLM step is one Claude run a day outside the app. Other digest tools (rssdigest, RSSbrew, RSSBox) also summarize feeds themselves. CondenseIt's source handling (Reddit thresholds, GitHub Releases, podcast search) is worth a look when those sources come up. Karakeep is a destination, not a competitor. Also considered earlier: **Readstr** (Start9 registry; upstream `privkeyio/readstr`), ruled out because it's a human-facing UI with no documented API.

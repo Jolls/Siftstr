@@ -2,9 +2,7 @@ package miniflux
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -16,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/ids"
 	"github.com/Jolls/Siftstr/internal/sources"
 )
 
@@ -51,7 +50,9 @@ type Result struct {
 	TooOld  int // entries skipped for being older than max_age_days
 }
 
-// Run ingests for one user. It never reads another user's rows.
+// Run ingests for one user. It never reads another user's rows. Feeds and
+// entries are written in one transaction, so a failed run leaves nothing
+// half-applied and a first sync of thousands of entries is one commit.
 func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	var res Result
 	conn, err := g.connection(ctx, userID)
@@ -68,33 +69,51 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	sources, err := g.syncSources(ctx, userID, feeds)
-	if err != nil {
-		return res, err
-	}
-	res.Sources = len(sources)
-
 	entries, err := api.UnreadEntries(ctx)
 	if err != nil {
 		return res, err
 	}
-	nowT := g.Now().UTC()
-	now := nowT.Format(time.RFC3339)
-	limit := g.intSetting(ctx, userID, "excerpt_length", DefaultExcerptLength, 1)
-	var cutoff time.Time // zero means no age limit
-	if days := g.intSetting(ctx, userID, "max_age_days", DefaultMaxAgeDays, 0); days > 0 {
-		cutoff = nowT.AddDate(0, 0, -days)
+	cfg, err := sources.New(g.DB).Ingest(ctx, userID)
+	if err != nil {
+		return res, err
 	}
+	now := g.Now().UTC()
+	var cutoff time.Time // zero means no age limit
+	if cfg.MaxAgeDays > 0 {
+		cutoff = now.AddDate(0, 0, -cfg.MaxAgeDays)
+	}
+	stamp := now.Format(time.RFC3339)
+
+	tx, err := g.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return res, err
+	}
+	defer tx.Rollback()
+
+	refs, err := syncSources(ctx, tx, userID, feeds)
+	if err != nil {
+		return res, err
+	}
+	res.Sources = len(refs)
+
+	insert, err := tx.PrepareContext(ctx,
+		`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, published_at, state, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_light', ?, ?)
+		 ON CONFLICT (user_id, source_id, external_id) DO NOTHING`)
+	if err != nil {
+		return res, err
+	}
+	defer insert.Close()
 	for _, e := range entries {
-		src, ok := sources[strconv.FormatInt(e.FeedID, 10)]
-		if !ok || !src.enabled {
+		ref, ok := refs[strconv.FormatInt(e.FeedID, 10)]
+		if !ok || !ref.enabled {
 			continue
 		}
 		if !cutoff.IsZero() && !e.Published.IsZero() && e.Published.Before(cutoff) {
 			res.TooOld++
 			continue
 		}
-		id, err := newID("itm_")
+		id, err := ids.New("itm_")
 		if err != nil {
 			return res, err
 		}
@@ -102,12 +121,8 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 		if !e.Published.IsZero() {
 			published = e.Published.UTC().Format(time.RFC3339)
 		}
-		r, err := g.DB.ExecContext(ctx,
-			`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, published_at, state, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_light', ?, ?)
-			 ON CONFLICT (user_id, source_id, external_id) DO NOTHING`,
-			id, userID, src.id, strconv.FormatInt(e.ID, 10), MediaType(e), e.URL, strings.TrimSpace(e.Title),
-			Excerpt(e.Content, limit), nullIfEmpty(e.Content), published, now, now)
+		r, err := insert.ExecContext(ctx, id, userID, ref.id, strconv.FormatInt(e.ID, 10), MediaType(e), e.URL,
+			strings.TrimSpace(e.Title), Excerpt(e.Content, cfg.ExcerptLength), nullIfEmpty(e.Content), published, stamp, stamp)
 		if err != nil {
 			return res, fmt.Errorf("insert item: %w", err)
 		}
@@ -115,7 +130,7 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 			res.Items++
 		}
 	}
-	return res, nil
+	return res, tx.Commit()
 }
 
 func (g *Ingester) connection(ctx context.Context, userID string) (connections.Connection, error) {
@@ -138,16 +153,16 @@ type sourceRef struct {
 
 // syncSources upserts one source per feed. Name and category follow
 // Miniflux; the user's per-source settings are never touched.
-func (g *Ingester) syncSources(ctx context.Context, userID string, feeds []Feed) (map[string]sourceRef, error) {
+func syncSources(ctx context.Context, tx *sql.Tx, userID string, feeds []Feed) (map[string]sourceRef, error) {
 	out := make(map[string]sourceRef, len(feeds))
 	for _, f := range feeds {
 		ext := strconv.FormatInt(f.ID, 10)
-		id, err := newID("src_")
+		id, err := ids.New("src_")
 		if err != nil {
 			return nil, err
 		}
 		var ref sourceRef
-		err = g.DB.QueryRowContext(ctx,
+		err = tx.QueryRowContext(ctx,
 			`INSERT INTO sources (id, user_id, kind, external_id, name, category) VALUES (?, ?, 'miniflux_feed', ?, ?, ?)
 			 ON CONFLICT (user_id, kind, external_id) DO UPDATE SET name = excluded.name, category = excluded.category
 			 RETURNING id, enabled`,
@@ -158,26 +173,6 @@ func (g *Ingester) syncSources(ctx context.Context, userID string, feeds []Feed)
 		out[ext] = ref
 	}
 	return out, nil
-}
-
-// intSetting reads an integer user setting that is at least min, else def.
-// max_age_days uses min 0 so that 0 can switch the age limit off.
-func (g *Ingester) intSetting(ctx context.Context, userID, key string, def, min int) int {
-	var v string
-	err := g.DB.QueryRowContext(ctx,
-		`SELECT value FROM user_settings WHERE user_id = ? AND key = ?`, userID, key).Scan(&v)
-	if n, convErr := strconv.Atoi(v); err == nil && convErr == nil && n >= min {
-		return n
-	}
-	return def
-}
-
-func newID(prefix string) (string, error) {
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return prefix + hex.EncodeToString(b), nil
 }
 
 func nullIfEmpty(s string) any {

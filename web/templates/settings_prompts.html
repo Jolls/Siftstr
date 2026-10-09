@@ -1,0 +1,18 @@
+{{define "content"}}
+<h1>Prompts</h1>
+{{template "settingsnav" .}}
+<p>These instructions go to Claude inside each morning's work package. Leave a box empty to use the default shown in grey. A per-source override on the Sources page is sent alongside them.</p>
+{{range .Prompts}}
+<article class="prompt">
+  <form method="post" action="/settings/prompts">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="name" value="{{.Name}}">
+    <label>{{.Label}}
+      <textarea name="value" rows="5" maxlength="20000" placeholder="{{.Default}}">{{.Value}}</textarea>
+    </label>
+    <small>{{.Help}}</small>
+    <button type="submit">Save</button>
+  </form>
+</article>
+{{end}}
+{{end}}

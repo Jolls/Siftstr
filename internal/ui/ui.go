@@ -28,6 +28,11 @@ type Page struct {
 	Notice       string // one-line confirmation, e.g. "Saved."
 	Sources      []SourceRow
 	Ingest       IngestForm
+	Timezone     string
+	ZoneGroups   []ZoneGroup
+	Keys         []KeyRow
+	NewKey       string // a just-created API key, shown once
+	Prompts      []PromptField
 	Destinations []Destination
 }
 
@@ -35,6 +40,31 @@ type Page struct {
 type IngestForm struct {
 	ExcerptLength int
 	MaxAgeDays    int
+}
+
+// KeyRow is one API key on /settings/keys. The key itself is never part of
+// it; only a freshly created key is shown, once, through Page.NewKey.
+type KeyRow struct {
+	ID       string
+	Label    string
+	Created  string // already in the user's timezone
+	LastUsed string
+	Revoked  string
+}
+
+// ZoneGroup is one region of the timezone dropdown.
+type ZoneGroup struct {
+	Region string
+	Zones  []string
+}
+
+// PromptField is one editable prompt on /settings/prompts.
+type PromptField struct {
+	Name    string
+	Label   string
+	Help    string
+	Value   string // the saved prompt, or empty when the default applies
+	Default string
 }
 
 // SourceRow is one editable source on /settings/sources.
@@ -91,6 +121,8 @@ var pageFiles = map[string][]string{
 	"items":                 {"items.html"},
 	"settings_sources":      {"settings_nav.html", "settings_sources.html"},
 	"settings_destinations": {"settings_nav.html", "settings_destinations.html"},
+	"settings_prompts":      {"settings_nav.html", "settings_prompts.html"},
+	"settings_keys":         {"settings_nav.html", "settings_keys.html"},
 }
 
 // New parses the embedded templates. Each page gets its own set so that

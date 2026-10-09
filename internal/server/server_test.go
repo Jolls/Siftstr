@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/store"
 )
@@ -42,7 +43,7 @@ func setup(t *testing.T, ready func(context.Context) error, secure bool) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := New(Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), SecureCookies: secure})
+	h, err := New(Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), SecureCookies: secure})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,13 +13,14 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/Jolls/Siftstr/internal/ids"
 )
 
 // kindSchemes lists the URL schemes of kinds that don't use http(s).
@@ -29,6 +30,9 @@ var kindSchemes = map[string][]string{"nostr": {"ws", "wss"}}
 var Kinds = []string{"miniflux", "karakeep", "metube", "youtube", "nextcloud", "nostr"}
 
 var (
+	// ErrBaseURL wraps every base URL validation failure, so callers can tell bad
+	// input from a database error. Its text starts the user-facing message.
+	ErrBaseURL = errors.New("base URL")
 	// ErrNotFound is returned for a missing connection or one owned by
 	// another user; the two are indistinguishable on purpose.
 	ErrNotFound = errors.New("connection not found")
@@ -122,12 +126,12 @@ func validateURL(kind, baseURL string) error {
 	}
 	u, err := url.Parse(baseURL)
 	if err != nil || !slices.Contains(schemes, u.Scheme) || u.Host == "" {
-		return fmt.Errorf("base URL must be a %s URL", strings.Join(schemes, "/"))
+		return fmt.Errorf("%w must be a %s URL", ErrBaseURL, strings.Join(schemes, "/"))
 	}
 	// Credentials belong in the encrypted secret, not in a column that Get and
 	// List return as-is.
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("base URL must not contain credentials, a query string or a fragment")
+		return fmt.Errorf("%w must not contain credentials, a query string or a fragment", ErrBaseURL)
 	}
 	return nil
 }
@@ -143,14 +147,6 @@ func validateConfig(config json.RawMessage) (json.RawMessage, error) {
 	return config, nil
 }
 
-func newID() (string, error) {
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return "con_" + hex.EncodeToString(b), nil
-}
-
 // Create saves a new connection for userID.
 func (s *Service) Create(ctx context.Context, userID string, in Input) (Connection, error) {
 	if !slices.Contains(Kinds, in.Kind) {
@@ -163,7 +159,7 @@ func (s *Service) Create(ctx context.Context, userID string, in Input) (Connecti
 	if err != nil {
 		return Connection{}, err
 	}
-	id, err := newID()
+	id, err := ids.New("con_")
 	if err != nil {
 		return Connection{}, err
 	}

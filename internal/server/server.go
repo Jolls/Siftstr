@@ -16,6 +16,7 @@ import (
 
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/ui"
 )
@@ -34,6 +35,7 @@ type Deps struct {
 	// Conns and Sources back the settings pages.
 	Conns   *connections.Service
 	Sources *sources.Service
+	Runs    *runs.Service
 	// SecureCookies sets the Secure flag. It comes from SIFTSTR_BASE_URL, not
 	// from r.TLS, because TLS ends at the reverse proxy.
 	SecureCookies bool
@@ -41,7 +43,8 @@ type Deps struct {
 
 type server struct {
 	Deps
-	ui *ui.Renderer
+	ui      *ui.Renderer
+	newKeys *oneTimeSecrets
 }
 
 // session is the authenticated context handed to protected handlers.
@@ -61,7 +64,7 @@ func New(d Deps) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &server{Deps: d, ui: r}
+	s := &server{Deps: d, ui: r, newKeys: newOneTimeSecrets(2 * time.Minute)}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
@@ -70,6 +73,8 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("POST /login", s.login)
 	mux.HandleFunc("POST /logout", s.protected(s.logout))
 	mux.HandleFunc("GET /api/v1/ping", s.apiAuth(s.ping))
+	mux.HandleFunc("POST /api/v1/runs", s.apiAuth(s.createRun))
+	mux.HandleFunc("POST /api/v1/runs/{run_id}/summaries", s.apiAuth(s.submitSummaries))
 	mux.HandleFunc("GET /{$}", s.protected(func(w http.ResponseWriter, req *http.Request, _ *session) {
 		http.Redirect(w, req, "/today", http.StatusSeeOther)
 	}))
@@ -79,6 +84,12 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /settings/sources", s.protected(s.sourcesForm))
 	mux.HandleFunc("POST /settings/ingest", s.protected(s.ingestSave))
 	mux.HandleFunc("POST /settings/sources/{id}", s.protected(s.sourcesSave))
+	mux.HandleFunc("GET /settings/prompts", s.protected(s.promptsForm))
+	mux.HandleFunc("POST /settings/prompts", s.protected(s.promptsSave))
+	mux.HandleFunc("POST /settings/timezone", s.protected(s.timezoneSave))
+	mux.HandleFunc("GET /settings/keys", s.protected(s.keysForm))
+	mux.HandleFunc("POST /settings/keys", s.protected(s.keyCreate))
+	mux.HandleFunc("POST /settings/keys/{id}/revoke", s.protected(s.keyRevoke))
 	mux.HandleFunc("GET /settings/destinations", s.protected(s.destinationsForm))
 	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}/delete", s.protected(s.destinationDelete))
@@ -113,7 +124,7 @@ func (s *server) protected(h func(http.ResponseWriter, *http.Request, *session))
 				http.Redirect(w, req, "/login", http.StatusSeeOther)
 				return
 			}
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			serverError(w)
 			return
 		}
 		sess := &session{User: u, Token: c.Value, CSRF: s.Auth.CSRFToken(c.Value)}
@@ -147,7 +158,7 @@ func (s *server) apiAuth(h func(http.ResponseWriter, *http.Request, auth.User)) 
 				apiUnauthorized(w)
 				return
 			}
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			apiError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 		h(w, req, u)
@@ -156,7 +167,17 @@ func (s *server) apiAuth(h func(http.ResponseWriter, *http.Request, auth.User)) 
 
 func apiUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", `Bearer realm="siftstr"`)
-	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	apiError(w, http.StatusUnauthorized, "unauthorized")
+}
+
+// serverError answers 500 without exposing the cause.
+func serverError(w http.ResponseWriter) {
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// apiError writes a JSON error body for /api routes.
+func apiError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -200,7 +221,7 @@ func (s *server) loginForm(w http.ResponseWriter, req *http.Request) {
 func (s *server) renderLogin(w http.ResponseWriter, status int, msg string) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	token := base64.RawURLEncoding.EncodeToString(b)
@@ -228,12 +249,12 @@ func (s *server) login(w http.ResponseWriter, req *http.Request) {
 		s.renderLogin(w, http.StatusUnauthorized, err.Error())
 		return
 	case err != nil:
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	token, expires, err := s.Auth.NewSession(req.Context(), u.ID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		serverError(w)
 		return
 	}
 	s.clearCookie(w, loginCookie)
