@@ -29,3 +29,7 @@
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude skills (pulled from Jolls/claude-skills; local only)
+/.claude-skills/
+/.claude/skills/

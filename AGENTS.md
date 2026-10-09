@@ -99,6 +99,17 @@ docker buildx build --platform linux/amd64,linux/arm64 -t siftstr .   # release 
 - **Memory stays in this repo, locally.** Any memory an agent keeps about this project goes in `.agent-memory/` at the repo root. It is git-ignored: never commit it, and don't store project memory anywhere else. Memory is for short-term notes. Anything lasting belongs in its proper project file (ARCHITECTURE.md, ROADMAP.md, this file, docs/), so promote it there and delete it from memory. An empty memory folder is the goal.
 - **No automatic commits.** Leave changes uncommitted so the user can review the file diffs. Commit only when the user says to, for example "commit when done". That counts as approval for that request only, not for later work. The same goes for pushing.
 
+## Issue triage
+
+Context for the issue skills (`/evaluate-issue`, `/update-issue`, `/implement-issues`, `/done`).
+
+- **Labels** are the GitHub defaults: `bug`, `enhancement`, `documentation`, `accessibility`, `question`, `good first issue`, `help wanted`, plus the closing labels `duplicate`, `invalid`, `wontfix`. Use `bug` or `enhancement` as the type, and add `documentation` or `accessibility` when they apply. Don't invent new labels without asking.
+- **Worth doing:** judge against [ROADMAP.md](ROADMAP.md) (what's in v1 versus later) and the Invariants above. An issue that breaks an invariant needs an ARCHITECTURE.md change and the user's approval first.
+- **Schema/database:** anything under `internal/store/` (migrations, queries), the data model in ARCHITECTURE.md, or the `/data` layout. Migrations are append-only.
+- **Security-sensitive:** `internal/auth/`, `internal/connections/`, API key or session or CSRF handling, `/api/*` and `/sync/actions` auth, secret handling, and anything that touches per-user isolation.
+- **Spans multiple packages:** a change that crosses more than one directory under `internal/`, or touches the action queue on both the Go side (`internal/sync/`, `internal/triage/`) and the client side (`web/static/`).
+- **Tracker and PRs:** GitHub via `gh`. The "No automatic commits" rule still applies: `/implement-issues` may commit and open a PR only when the user has asked for that run to do so.
+
 ## Testing priorities
 
 1. The triage state machine: every transition, the promote-once rule, and undo.
