@@ -363,7 +363,7 @@ An item's current outcome is derived from its latest effective action. The janit
 - **Gestures:** a small pointer-events script detects swipes and enqueues the action. After each action, the client scrolls to the next unsifted item.
 - **Reading page:** the same swipe actions work when scrolling visually. Gesture affordances must stay out of the readable text flow so TTS doesn't read them aloud. Use semantic `<article>` markup.
 - **Layout** switches with CSS media queries, not user-agent sniffing.
-- **Styling:** a real CSS layer, either Pico.css or Tailwind (to decide).
+- **Styling:** Pico.css, embedded in the binary. No CSS build step.
 
 ---
 
@@ -402,15 +402,15 @@ The Claude scheduled task has to reach the instance over the network. That affec
 | Concern | Choice | Notes |
 |---|---|---|
 | Backend | Go | Single static binary |
-| HTML | `html/template` or `templ` | To decide |
+| HTML | `html/template` | **Decided.** Stdlib only; no codegen step. |
 | Frontend | HTMX + small vanilla JS (gestures, action queue, sender) | No SPA framework, no service worker, no Node build |
 | Client storage | `localStorage` | Unsent actions only |
-| CSS | Pico.css *(proposed)* or Tailwind | Pico needs no build step. Tailwind needs its standalone CLI. |
-| DB | SQLite via `modernc.org/sqlite` *(proposed)* | Pure Go, no CGO |
+| CSS | Pico.css | **Decided.** No build step. |
+| DB | SQLite via `modernc.org/sqlite` | **Decided.** Pure Go, no CGO |
 | Assets | `embed.FS` | Static files and migrations inside the binary |
 | Nostr | `github.com/nbd-wtf/go-nostr` *(proposed)* | |
 | Packaging | Docker image (`linux/amd64` + `linux/arm64`) | See Deployment below |
-| License | TBD | Will be open-sourced on GitHub |
+| License | AGPL-3.0 | **Decided.** See `LICENSE`. |
 
 ### Deployment
 
@@ -482,7 +482,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 15. **Day boundaries:** the morning run is the boundary. What timezone, and what happens if the run fails or is skipped for a day? *(Proposed: the previous briefing stays current, and the next run picks up everything.)*
 16. **Janitor and Backlog:** should items still untriaged in Backlog after 6 months be deleted silently?
 17. ~~**Single vs. multi-user.**~~ **Decided:** the architecture and data model are multi-user from day one. v1 runs with one bootstrapped user, and user management features are on the [roadmap](ROADMAP.md).
-18. **Prior art:** the planned check for existing open-source projects hasn't happened yet. Already considered: **Readstr** (Start9 registry; upstream `privkeyio/readstr`), an RSS/Nostr/video reader. It was ruled out as a replacement for Miniflux or Nostr because it's a human-facing UI with no documented API, so Siftstr integrates with Miniflux and Nostr relays directly.
+18. ~~**Prior art.**~~ **Decided (2026-10-09):** a web search found no project that combines Miniflux and Nostr ingest, a once-a-day Claude summary, and archive/promote/keep triage with write-back. The closest is **CondenseIt** (`wildlifechorus/condenseit`, MIT), an all-in-one digest reader: it fetches its own sources, calls an LLM itself (Ollama, OpenRouter, or an OpenAI-compatible endpoint), and ranks items from learned preferences, but has no Nostr support and no write-back. Siftstr is the integrating alternative: Miniflux and Nostr stay the system of record, decisions write back through the outbox to Karakeep, MeTube and Miniflux, and the only LLM step is one Claude run a day outside the app. Other digest tools (rssdigest, RSSbrew, RSSBox) also summarize feeds themselves. CondenseIt's source handling (Reddit thresholds, GitHub Releases, podcast search) is worth a look when those sources come up. Karakeep is a destination, not a competitor. Also considered earlier: **Readstr** (Start9 registry; upstream `privkeyio/readstr`), ruled out because it's a human-facing UI with no documented API.
 19. ~~**Undo grace period.**~~ **Decided:** server-side hold, 15 minutes from receipt (configurable). *Proposed:* undo after the hold ends is refused rather than reversed upstream.
 20. **Multiple devices:** actions from a phone and a desktop on the same item are ordered by client timestamp. Is last-write-wins acceptable?
 21. ~~**StartOS package location.**~~ **Decided:** a separate repo. This repo stays platform-neutral.
