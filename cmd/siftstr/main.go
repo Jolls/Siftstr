@@ -29,6 +29,9 @@ import (
 const usage = `usage:
   siftstr serve                                  run the server (default)
   siftstr healthcheck                            exit 0 if the local server answers /healthz (for Docker)
+  siftstr apikey create <username> [--label text]  mint an API key (shown once)
+  siftstr apikey list <username>
+  siftstr apikey revoke <username> <key-id>
   siftstr user add [--admin] <username>          create a user; password is read from stdin
   siftstr user set-password <username>           reset a password; password is read from stdin`
 
@@ -51,6 +54,8 @@ func run(args []string, stdin io.Reader) error {
 		return healthcheck(os.Getenv("SIFTSTR_LISTEN"))
 	case "user":
 		return userCmd(args, stdin)
+	case "apikey":
+		return apikeyCmd(args, os.Stdout)
 	case "help", "-h", "--help":
 		fmt.Println(usage)
 		return nil
@@ -131,6 +136,64 @@ func serve() error {
 	log.Printf("listening on %s", cfg.Listen)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	return nil
+}
+
+func apikeyCmd(args []string, out io.Writer) error {
+	if len(args) < 2 {
+		return errors.New(usage)
+	}
+	sub, args := args[0], args[1:]
+
+	fs := flag.NewFlagSet("apikey "+sub, flag.ContinueOnError)
+	label := fs.String("label", "", "label for the key")
+	// Accept the username first, then flags, e.g. "create alice --label x".
+	username, rest := args[0], args[1:]
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	_, st, a, err := open(ctx)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	u, err := a.UserByUsername(ctx, username)
+	if err != nil {
+		return err
+	}
+
+	switch sub {
+	case "create":
+		k, secret, err := a.CreateAPIKey(ctx, u.ID, *label)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "key id: %s\nAPI key (shown once, store it now):\n%s\n", k.ID, secret)
+	case "list":
+		keys, err := a.ListAPIKeys(ctx, u.ID)
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			state := "active"
+			if k.RevokedAt != nil {
+				state = "revoked"
+			}
+			fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", k.ID, state, k.CreatedAt.Format(time.RFC3339), k.Label)
+		}
+	case "revoke":
+		if fs.NArg() != 1 {
+			return errors.New(usage)
+		}
+		if err := a.RevokeAPIKey(ctx, u.ID, fs.Arg(0)); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "revoked %s\n", fs.Arg(0))
+	default:
+		return fmt.Errorf("unknown apikey command %q\n%s", sub, usage)
 	}
 	return nil
 }

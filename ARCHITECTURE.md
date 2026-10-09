@@ -383,6 +383,8 @@ An item's current outcome is derived from its latest effective action. The janit
 
 - `Authorization: Bearer <api key>`, valid on `/api/*` only.
 - Keys belong to a user, are stored hashed, and can be created and revoked from that user's Settings. A key only ever sees its owner's data.
+- Keys start with `sft_` and are shown once, at creation. Until the Settings page exists, `siftstr apikey create|list|revoke <username>` manages them. Session cookies are not accepted on `/api/*`, and API keys are not accepted anywhere else.
+- `GET /api/v1/ping` returns `{"user": "<username>"}` for a valid key, so a scheduled task can check its setup before a run.
 
 ### Multi-user rules (apply from v1)
 

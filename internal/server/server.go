@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/auth"
@@ -62,6 +64,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /login", s.loginForm)
 	mux.HandleFunc("POST /login", s.login)
 	mux.HandleFunc("POST /logout", s.protected(s.logout))
+	mux.HandleFunc("GET /api/v1/ping", s.apiAuth(s.ping))
 	mux.HandleFunc("GET /{$}", s.protected(func(w http.ResponseWriter, req *http.Request, _ *session) {
 		http.Redirect(w, req, "/today", http.StatusSeeOther)
 	}))
@@ -114,6 +117,46 @@ func (s *server) protected(h func(http.ResponseWriter, *http.Request, *session))
 		}
 		h(w, req, sess)
 	}
+}
+
+// apiAuth requires "Authorization: Bearer <api key>". It is the only auth
+// that /api/* accepts: session cookies are ignored here, and API keys are
+// ignored everywhere else, so no CSRF check applies to these routes.
+func (s *server) apiAuth(h func(http.ResponseWriter, *http.Request, auth.User)) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		scheme, key, ok := strings.Cut(req.Header.Get("Authorization"), " ")
+		if !ok || !strings.EqualFold(scheme, "Bearer") {
+			apiUnauthorized(w)
+			return
+		}
+		u, err := s.Auth.UserForAPIKey(req.Context(), strings.TrimSpace(key))
+		if err != nil {
+			if errors.Is(err, auth.ErrNoSession) {
+				apiUnauthorized(w)
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		h(w, req, u)
+	}
+}
+
+func apiUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="siftstr"`)
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// ping lets a scheduled task confirm its key works and see whose it is.
+func (s *server) ping(w http.ResponseWriter, _ *http.Request, u auth.User) {
+	writeJSON(w, http.StatusOK, map[string]string{"user": u.Username})
 }
 
 func (s *server) page(sess *session, active, title string) ui.Page {

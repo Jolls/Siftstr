@@ -227,3 +227,73 @@ func TestSecurityHeadersAndStatic(t *testing.T) {
 		t.Errorf("unknown = %d", resp.StatusCode)
 	}
 }
+
+func apiGet(t *testing.T, e *env, header string, cookie *http.Cookie) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/api/v1/ping", nil)
+	if header != "" {
+		req.Header.Set("Authorization", header)
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestAPIRequiresBearerKey(t *testing.T) {
+	e := setup(t, nil, false)
+	ctx := context.Background()
+	u, _ := e.auth.CreateUser(ctx, "alice", "password-one", auth.RoleUser)
+	k, secret, _ := e.auth.CreateAPIKey(ctx, u.ID, "")
+
+	resp := apiGet(t, e, "Bearer "+secret, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(e.body(t, resp), `"user":"alice"`) {
+		t.Fatalf("valid key = %d", resp.StatusCode)
+	}
+	if resp := apiGet(t, e, "bearer "+secret, nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("scheme is case-insensitive, got %d", resp.StatusCode)
+	}
+
+	for name, h := range map[string]string{
+		"none": "", "wrong scheme": "Basic " + secret, "forged": "Bearer sft_forged", "bare": secret,
+	} {
+		resp := apiGet(t, e, h, nil)
+		if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") == "" {
+			t.Errorf("%s = %d", name, resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("%s content-type = %q", name, ct)
+		}
+	}
+
+	_ = e.auth.RevokeAPIKey(ctx, u.ID, k.ID)
+	if resp := apiGet(t, e, "Bearer "+secret, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("revoked key = %d", resp.StatusCode)
+	}
+}
+
+// API keys work on /api/* only, and session cookies do not work there.
+func TestAPIAndSessionAuthAreSeparate(t *testing.T) {
+	e := setup(t, nil, false)
+	ctx := context.Background()
+	u, _ := e.auth.CreateUser(ctx, "alice", "password-one", auth.RoleUser)
+	_, secret, _ := e.auth.CreateAPIKey(ctx, u.ID, "")
+	token, _, _ := e.auth.NewSession(ctx, u.ID)
+
+	cookie := &http.Cookie{Name: sessionCookie, Value: token}
+	if resp := apiGet(t, e, "", cookie); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("session cookie on /api = %d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/today", nil)
+	req.Header.Set("Authorization", "Bearer "+secret)
+	c := e.client()
+	resp, _ := c.Do(req)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" {
+		t.Errorf("API key on HTML route = %d", resp.StatusCode)
+	}
+}

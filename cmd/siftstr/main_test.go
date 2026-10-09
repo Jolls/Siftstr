@@ -62,3 +62,47 @@ func TestHealthcheck(t *testing.T) {
 		t.Error("bad address should fail")
 	}
 }
+
+func TestAPIKeyCLI(t *testing.T) {
+	t.Setenv("SIFTSTR_DATA_DIR", t.TempDir())
+	if err := run([]string{"user", "add", "alice"}, strings.NewReader("password-one\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if err := apikeyCmd([]string{"create", "alice", "--label", "claude"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var id, secret string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if v, ok := strings.CutPrefix(line, "key id: "); ok {
+			id = v
+		}
+		if strings.HasPrefix(line, "sft_") {
+			secret = line
+		}
+	}
+	if id == "" || secret == "" {
+		t.Fatalf("create output = %q", out.String())
+	}
+
+	out.Reset()
+	if err := apikeyCmd([]string{"list", "alice"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), id) || !strings.Contains(out.String(), "active") || strings.Contains(out.String(), secret) {
+		t.Fatalf("list must show the key id and state but never the secret: %q", out.String())
+	}
+
+	if err := apikeyCmd([]string{"revoke", "alice", id}, &out); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	_ = apikeyCmd([]string{"list", "alice"}, &out)
+	if !strings.Contains(out.String(), "revoked") {
+		t.Fatalf("after revoke: %q", out.String())
+	}
+	if err := apikeyCmd([]string{"create", "ghost"}, &out); err == nil {
+		t.Error("unknown user accepted")
+	}
+}
