@@ -40,6 +40,10 @@ The data model, auth, scoping, and per-user connections already support multiple
 ## Later
 
 - **MCP server or plugin** as an alternative to the scheduled-task API.
+- **Local LLM summarizer** (Ollama, LM Studio, vLLM, or any OpenAI-compatible server) as an alternative to the Claude daily task. Siftstr sends each new item to the user's local model as it is ingested and stores the summary in the database, so there is no daily batch for this mode. It is a per-user, opt-in setting (endpoint and model stored in `connections`), and the Claude path stays as it is. Local mode needs these changes first:
+  - Loosen the "No LLM calls in the app" and "One Claude run per day" invariants in AGENTS.md and ARCHITECTURE.md to cover an optional local summarizer. Hosted models are still out: no model SDKs, only a plain HTTP client to a user-run endpoint.
+  - Put the summarizer behind an interface with an `httptest` fake, like every other external service.
+  - Decide what Today shows while an item has no summary yet (model slow or down), and how promote's deeper summary works in this mode.
 - **Rule-based filtering** (keyword, category, or author conditions) beyond the per-source settings.
 - **Transcription** for podcasts and videos, so deep summaries can use the actual content.
 - **More destinations** for kept items (e.g. other downloaders or podcast apps) through the `Destination` interface.
