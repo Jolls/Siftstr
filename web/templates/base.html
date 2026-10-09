@@ -1,0 +1,29 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{if .Title}}{{.Title}} · {{end}}Siftstr</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul><li><strong>Siftstr</strong></li></ul>
+      {{if .User}}
+      <ul>
+        <li><a href="/today"{{if eq .Active "today"}} aria-current="page"{{end}}>Today</a></li>
+        <li><a href="/backlog"{{if eq .Active "backlog"}} aria-current="page"{{end}}>Backlog</a></li>
+        <li><a href="/read"{{if eq .Active "read"}} aria-current="page"{{end}}>Read</a></li>
+        <li><a href="/settings/sources"{{if eq .Active "settings"}} aria-current="page"{{end}}>Settings</a></li>
+      </ul>
+      {{end}}
+    </nav>
+  </header>
+  <main class="container">
+{{template "content" .}}
+  </main>
+</body>
+</html>{{end}}

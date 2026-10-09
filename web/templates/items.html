@@ -1,0 +1,33 @@
+{{define "content"}}
+<h1>{{.Heading}}</h1>
+{{if .Items}}
+<section class="items" aria-label="{{.Heading}}">
+  {{range .Items}}{{template "item" .}}{{end}}
+</section>
+{{else}}
+<p>{{.Empty}}</p>
+{{end}}
+{{end}}
+
+{{/*
+  One triage card. The badge span is always in the DOM and starts hidden;
+  the action queue shows it as soon as an action is queued. Actioned items are
+  never removed. Controls sit in <footer>, outside the readable text flow,
+  and enqueue actions through the page queue (never a direct request).
+*/}}
+{{define "item"}}
+<article class="item" id="{{.ID}}" data-item-id="{{.ID}}" data-state="{{.State}}" data-media-type="{{.MediaType}}" tabindex="0">
+  <hgroup>
+    <h2><a href="{{.URL}}" rel="noopener noreferrer">{{.Title}}</a></h2>
+    <p>{{.Source}}</p>
+  </hgroup>
+  {{if .Summary}}<p class="summary">{{.Summary}}</p>{{end}}
+  <footer class="controls" aria-label="Triage actions">
+    <span class="badge" data-badge{{if not .Badge}} hidden{{end}}>{{.Badge}}</span>
+    <button type="button" class="secondary" data-action="archive">Archive</button>
+    {{if .CanPromote}}<button type="button" class="outline" data-action="promote">Promote</button>{{end}}
+    <button type="button" data-action="keep">Keep</button>
+    <button type="button" class="outline" data-action="undo" hidden>Undo</button>
+  </footer>
+</article>
+{{end}}

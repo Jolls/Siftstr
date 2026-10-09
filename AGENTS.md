@@ -52,7 +52,8 @@ internal/ingest/        miniflux/, nostr/
 internal/dest/          miniflux/, karakeep/, metube/, youtube/  (Destination impls)
 internal/outbox/        queue and workers
 internal/store/         SQLite access and embedded migrations
-web/static/             htmx, CSS, gestures.js, queue.js (action queue + sender)
+web/static/             Pico.css, app.css, later htmx, gestures.js, queue.js (action queue + sender)
+web/templates/          html/template files (base, login, items); embedded via web/embed.go
 docs/                   API.md and other specs
 Dockerfile              multi-stage, static binary, distroless/scratch runtime
 compose.yaml            example deployment for plain Docker
@@ -60,7 +61,7 @@ compose.yaml            example deployment for plain Docker
 
 ## Commands
 
-None yet; fill these in once `go.mod` exists. Expected:
+`go.mod` exists now. The Docker commands apply once the `Dockerfile` lands:
 
 ```sh
 go build ./...

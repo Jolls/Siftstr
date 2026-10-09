@@ -1,0 +1,36 @@
+/* Layout switches with media queries only; no user-agent sniffing. */
+
+.error { color: var(--pico-del-color); }
+.login { max-width: 24rem; margin-inline: auto; }
+
+.items { display: grid; gap: 1rem; }
+.item { margin: 0; }
+.item h2 { font-size: 1.15rem; margin-bottom: 0.25rem; }
+.item hgroup p { font-size: 0.85rem; }
+.item .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.item .controls button { margin: 0; width: auto; }
+
+.badge {
+  margin-inline-end: auto;
+  padding: 0.1rem 0.6rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  background: var(--pico-muted-border-color);
+}
+.item[data-state="archived"],
+.item[data-state="kept"],
+.item[data-state="pending_deep"] { opacity: 0.6; }
+
+/* Mobile: one card at a time, scroll-snapped. */
+@media (max-width: 767px) {
+  .items { scroll-snap-type: y proximity; }
+  .item { scroll-snap-align: start; }
+}
+
+/* Desktop: compact list. */
+@media (min-width: 768px) {
+  .items { gap: 0; }
+  .item { padding: 0.75rem 1rem; border-radius: 0; box-shadow: none; border-bottom: 1px solid var(--pico-muted-border-color); }
+  .item:focus { outline: 2px solid var(--pico-primary); outline-offset: -2px; }
+  .item .controls { padding: 0; margin: 0; background: none; border: 0; }
+}
