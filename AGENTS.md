@@ -71,6 +71,10 @@ gofmt -l .            # must print nothing
 node --test web/test/*.test.js   # client queue and gesture tests; dev-only, also run by `go test ./web` when node is installed
 docker build -t siftstr .
 docker buildx build --platform linux/amd64,linux/arm64 -t siftstr .   # release builds
+
+# run locally (the standard way; data lives in the siftstr-data volume)
+SIFTSTR_ADMIN_USER=admin SIFTSTR_ADMIN_PASSWORD=... docker compose up -d --build   # admin vars matter on first start only
+docker compose logs -f
 ```
 
 ## Conventions

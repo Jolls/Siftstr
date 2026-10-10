@@ -442,6 +442,19 @@ type Released struct {
 // a failure rolls both back and the next tick tries again. Held actions live
 // in SQLite, so a restart loses nothing.
 func (s *Service) ReleaseDue(ctx context.Context, userID string) ([]string, error) {
+	return s.release(ctx, userID, stamp(s.Now().UTC()))
+}
+
+// ReleaseNow releases all of userID's held actions without waiting for their
+// holds to end. It is the same release as ReleaseDue, so the effects are
+// queued in the outbox exactly as they would be later. Undo is no longer
+// possible for these actions afterwards.
+func (s *Service) ReleaseNow(ctx context.Context, userID string) ([]string, error) {
+	return s.release(ctx, userID, "9999")
+}
+
+// release releases held actions whose release_at is at or before cutoff.
+func (s *Service) release(ctx context.Context, userID, cutoff string) ([]string, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -450,7 +463,7 @@ func (s *Service) ReleaseDue(ctx context.Context, userID string) ([]string, erro
 	rows, err := tx.QueryContext(ctx,
 		`UPDATE actions SET status = 'released' WHERE user_id = ? AND status = 'held' AND release_at <= ?
 		 RETURNING action_id, subject_type, subject_id, kind, COALESCE(prev_state, '')`,
-		userID, stamp(s.Now().UTC()))
+		userID, cutoff)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,12 @@
 {{template "settingsnav" .}}
 <p>Your decisions reach Miniflux, Karakeep and MeTube a few minutes after the undo window. Each update is listed here. A <strong>paused</strong> update ran out of retries, for example while a service was down. A <strong>failed</strong> update needs a fix first, such as a corrected URL or token under Destinations. Retry sends it again. Dismiss hides it without sending anything.</p>
 
+<form method="post" action="/settings/activity/release">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <button type="submit" class="secondary">Release held actions now</button>
+  <small>Skips the undo window: your decisions are queued to send right away and can no longer be undone.</small>
+</form>
+
 {{if .Activity}}
 <table class="activity">
   <thead>
