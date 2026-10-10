@@ -558,3 +558,23 @@ func TestActionedCardsStayWithAnUndoOnlyWhileHeld(t *testing.T) {
 		t.Fatalf("promoted card after the hold: %+v", c)
 	}
 }
+
+func TestReleaseNowSkipsTheHoldForOneUser(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "i1", "u1", "src1", "light", "")
+	f.item(t, "i9", "u2", "src9", "light", "")
+	f.apply(t, "u1", act("a1", "i1", Keep, f.now))
+	f.apply(t, "u2", act("b1", "i9", Keep, f.now))
+	if due, _ := f.s.ReleaseDue(context.Background(), "u1"); len(due) != 0 {
+		t.Fatalf("ReleaseDue released %v inside the hold", due)
+	}
+	got, err := f.s.ReleaseNow(context.Background(), "u1")
+	if err != nil || len(got) != 1 || got[0] != "a1" {
+		t.Fatalf("released %v, %v", got, err)
+	}
+	var status string
+	f.st.DB().QueryRow(`SELECT status FROM actions WHERE action_id = 'b1'`).Scan(&status)
+	if status != "held" {
+		t.Fatalf("u2's action is %s", status)
+	}
+}

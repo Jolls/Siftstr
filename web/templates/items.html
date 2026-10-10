@@ -26,8 +26,8 @@
     <span class="badge" data-badge{{if not .Badge}} hidden{{end}}>{{.Badge}}</span>
     <span class="notice" data-notice role="status" hidden></span>
     <button type="button" class="secondary" data-action="archive">Archive</button>
-    {{if .CanPromote}}<button type="button" class="outline" data-action="promote"{{if ne .State "light"}} hidden{{end}}>Promote</button>{{end}}
     <button type="button" data-action="keep">Keep</button>
+    {{if .CanPromote}}<button type="button" class="outline" data-action="promote"{{if ne .State "light"}} hidden{{end}}>Promote</button>{{end}}
     <button type="button" class="outline" data-action="undo"{{if not .UndoID}} hidden{{end}}>Undo</button>
   </footer>
 </article>

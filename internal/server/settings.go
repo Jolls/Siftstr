@@ -27,7 +27,7 @@ var destinationKinds = []ui.Destination{
 	{Kind: "metube", Label: "MeTube", Help: "Where kept videos are sent to download.", SecretLabel: "Secret (optional)"},
 }
 
-var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked.", "retried": "Queued to send again.", "dismissed": "Dismissed."}
+var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked.", "retried": "Queued to send again.", "dismissed": "Dismissed.", "released": "Held actions released. They will be sent shortly."}
 
 func (s *server) settingsPage(sess *session, req *http.Request, title string) ui.Page {
 	p := s.page(sess, "settings", title)
@@ -322,6 +322,14 @@ func (s *server) activityRetry(w http.ResponseWriter, req *http.Request, sess *s
 
 func (s *server) activityDismiss(w http.ResponseWriter, req *http.Request, sess *session) {
 	s.activityChange(w, req, s.Outbox.Dismiss(req.Context(), sess.User.ID, req.PathValue("id"), time.Now()), "dismissed")
+}
+
+func (s *server) activityReleaseNow(w http.ResponseWriter, req *http.Request, sess *session) {
+	if _, err := s.Triage.ReleaseNow(req.Context(), sess.User.ID); err != nil {
+		serverError(w)
+		return
+	}
+	http.Redirect(w, req, "/settings/activity?notice=released", http.StatusSeeOther)
 }
 
 func (s *server) activityChange(w http.ResponseWriter, req *http.Request, err error, notice string) {

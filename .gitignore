@@ -17,6 +17,7 @@
 .env
 .env.*
 !.env.example
+.local/
 
 # Personal idea notes (not for publishing)
 /idea-generation.md
@@ -33,3 +34,4 @@ Thumbs.db
 # Claude skills (pulled from Jolls/claude-skills; local only)
 /.claude-skills/
 /.claude/skills/
+compose.override.yaml

@@ -7,11 +7,27 @@
 .item { margin: 0; touch-action: pan-y; } /* vertical scroll is the browser's; horizontal swipes are ours */
 .item h2 { font-size: 1.15rem; margin-bottom: 0.25rem; }
 .item hgroup p { font-size: 0.85rem; }
-.item .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+/* Buttons read left to right as the keys do: archive (left), keep (centre/space), promote (right). */
+.item .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: center; }
 .item .controls button { margin: 0; width: auto; }
+.item .controls [data-badge], .item .controls [data-notice] { order: -1; flex-basis: 100%; text-align: center; }
+.item .controls [data-badge] { flex-basis: auto; }
+
+/* Once actioned, only the chosen button stays, pushed to its side, with Undo beside it. */
+.item[data-state="archived"] .controls { justify-content: flex-start; }
+.item[data-state="kept"] .controls { justify-content: center; }
+.item[data-state="pending_deep"] .controls { justify-content: flex-end; }
+.item[data-state="archived"] [data-action="keep"],
+.item[data-state="archived"] [data-action="promote"],
+.item[data-state="kept"] [data-action="archive"],
+.item[data-state="kept"] [data-action="promote"],
+.item[data-state="pending_deep"] [data-action="archive"],
+.item[data-state="pending_deep"] [data-action="keep"] { display: none; }
+/* Promote sits right, so its Undo goes on its left. The script hides Promote outside "light"; keep it visible here. */
+.item[data-state="pending_deep"] [data-action="promote"] { display: inline-block; }
+.item[data-state="pending_deep"] [data-action="undo"] { order: -1; }
 
 .badge {
-  margin-inline-end: auto;
   padding: 0.1rem 0.6rem;
   border-radius: 1rem;
   font-size: 0.8rem;

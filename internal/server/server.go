@@ -105,6 +105,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("POST /settings/keys", s.protected(s.keyCreate))
 	mux.HandleFunc("POST /settings/keys/{id}/revoke", s.protected(s.keyRevoke))
 	mux.HandleFunc("GET /settings/activity", s.protected(s.activityForm))
+	mux.HandleFunc("POST /settings/activity/release", s.protected(s.activityReleaseNow))
 	mux.HandleFunc("POST /settings/activity/{id}/retry", s.protected(s.activityRetry))
 	mux.HandleFunc("POST /settings/activity/{id}/dismiss", s.protected(s.activityDismiss))
 	mux.HandleFunc("GET /settings/nostr", s.protected(s.nostrForm))
