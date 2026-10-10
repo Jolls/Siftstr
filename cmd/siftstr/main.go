@@ -256,6 +256,10 @@ func serve() error {
 		_ = srv.Shutdown(shutdown)
 	}()
 
+	var nConns int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM connections`).Scan(&nConns); err == nil && nConns == 0 {
+		log.Printf("no upstream connections: nothing will be ingested or written back")
+	}
 	log.Printf("listening on %s", cfg.Listen)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err

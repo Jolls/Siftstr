@@ -135,6 +135,8 @@ gofmt -l .                      # must print nothing
 node --test web/test/*.test.js  # client queue and gesture tests
 ```
 
+To try the app with sample data and no real upstreams, see [docs/development.md](docs/development.md).
+
 Releases: pushing a tag like `v1.0.0` runs `.github/workflows/release.yml`, which builds `linux/amd64` and `linux/arm64` with `docker buildx` and publishes to `ghcr.io`. See [AGENTS.md](AGENTS.md) for the conventions and invariants.
 
 ## License

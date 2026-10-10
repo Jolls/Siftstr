@@ -1,0 +1,19 @@
+# Local test instance: never talks to a real Miniflux, Karakeep or MeTube.
+# Own project name and own data directory, so it cannot share a database or
+# secret.key with a real instance. See docs/development.md.
+#
+#   docker compose -f compose.dev.yaml up -d --build
+name: siftstr-dev
+services:
+  siftstr:
+    build: .
+    ports:
+      - "8081:8080"
+    environment:
+      SIFTSTR_ADMIN_USER: ${SIFTSTR_ADMIN_USER:-dev}
+      SIFTSTR_ADMIN_PASSWORD: ${SIFTSTR_ADMIN_PASSWORD:-dev-password-change-me}
+      # Plain http on localhost: no BASE_URL, so cookies are not Secure.
+      TZ: ${TZ:-UTC}
+    volumes:
+      # Bind mount so `go run ./cmd/seed` on the host can reach the database.
+      - ./.local/dev-data:/data

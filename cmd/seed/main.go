@@ -3,6 +3,7 @@
 // development tool and is not part of the released image.
 //
 //	go run ./cmd/seed load   -data ./data -user alice -file cmd/seed/example.json
+//	go run ./cmd/seed load   ... -hold 1   (also sets a short undo hold)
 //	go run ./cmd/seed export -data ./data -user alice > .agent-memory/my-seed.json
 //
 // Export copies real titles, URLs and summaries. Keep that file out of the
@@ -15,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/store"
@@ -35,6 +37,7 @@ func run(args []string) error {
 	data := fs.String("data", "", "Siftstr data directory (holds siftstr.db)")
 	user := fs.String("user", "", "username to load into or export from")
 	file := fs.String("file", "", "seed file to load")
+	hold := fs.Int("hold", -1, "load only: set the user's undo_hold_minutes (0 releases actions on the next minute tick)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -71,6 +74,17 @@ func run(args []string) error {
 	s, i, err := load(ctx, st.DB(), *user, f, time.Now())
 	if err != nil {
 		return err
+	}
+	if *hold >= 0 {
+		uid, err := userID(ctx, st.DB(), *user)
+		if err != nil {
+			return err
+		}
+		if _, err := st.DB().ExecContext(ctx, `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'undo_hold_minutes', ?)
+			ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`, uid, strconv.Itoa(*hold)); err != nil {
+			return err
+		}
+		fmt.Printf("undo_hold_minutes set to %d for %s\n", *hold, *user)
 	}
 	fmt.Printf("added %d sources and %d items for %s\n", s, i, *user)
 	return nil
