@@ -29,6 +29,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/dest/metube"
 	destminiflux "github.com/Jolls/Siftstr/internal/dest/miniflux"
 	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
+	"github.com/Jolls/Siftstr/internal/ingest/nostr"
 	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/scheduler"
@@ -158,6 +159,22 @@ func serve() error {
 			}
 			if err == nil && (res.Items > 0 || res.TooOld > 0) {
 				log.Printf("miniflux ingest: %d new items, %d skipped as too old", res.Items, res.TooOld)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	nn := &nostr.Ingester{DB: st.DB(), Conns: conns, Fetch: nostr.RelayFetcher{}, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		Name: "ingest-nostr", Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := nn.Run(ctx, userID)
+			if errors.Is(err, nostr.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if err == nil && (res.Items > 0 || res.TooOld > 0 || res.Invalid > 0) {
+				log.Printf("nostr ingest: %d new items, %d skipped as too old, %d invalid events dropped", res.Items, res.TooOld, res.Invalid)
 			}
 			return err
 		},

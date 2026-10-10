@@ -59,7 +59,7 @@ Siftstr is **not** a reader. Kept items go to tools that handle the actual consu
 | Audio podcasts | Podcast RSS, via Miniflux (title and show notes only) |
 | GitHub | Mainly releases (`releases.atom`). Other repo activity (issues, PRs, commits) works the same way through any feed URL. Via Miniflux. |
 | Newsletters | Hidden or proxied RSS, via Miniflux |
-| Nostr | Direct relay subscriptions. This is the only non-Miniflux source. |
+| Nostr | Direct relay queries for followed npubs. This is the only non-Miniflux source. |
 | Karakeep "bookmarks" | Listed as a source in the notes, but undefined. See open questions. |
 
 In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped goes through Miniflux.
@@ -94,7 +94,7 @@ In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped
 | Accounts | Users, password login, sessions, per-user API keys, per-user upstream connections (secrets encrypted at rest) |
 | Scheduler | In-app timers for ingestion, releasing held actions, and the janitor. Ingestion runs once per user. |
 | Miniflux ingestor | Mirrors feeds and categories into `sources`; pulls unread entries on a timer into the database; dedupes by entry ID |
-| Nostr ingestor | Keeps subscriptions open to configured relays and pubkeys/topics; dedupes by event ID |
+| Nostr ingestor | On the ingest timer, opens a short subscription to each of the user's relays for the followed npubs, reads until the relay signals end of stored events, and closes it. Drops events with a bad ID or signature or from an unfollowed key, skips replies, and dedupes by event ID. Items link to a public viewer (`njump.me`) because events have no URL of their own. |
 | Work dispenser | When Claude asks for work, applies carryover, then builds the work package from whatever is in the database: pending items grouped by source and mode, with resolved prompts |
 | Briefing builder | Once summaries arrive, assembles the day's briefing (Today + Backlog) and writes the markdown file |
 | Action log and triage service | Stores incoming actions idempotently, runs the item state machine, handles undo by cancelling held effects |
@@ -440,7 +440,7 @@ The Claude scheduled task has to reach the instance over the network. That affec
 | CSS | Pico.css | **Decided.** No build step. |
 | DB | SQLite via `modernc.org/sqlite` | **Decided.** Pure Go, no CGO |
 | Assets | `embed.FS` | Static files and migrations inside the binary |
-| Nostr | `github.com/nbd-wtf/go-nostr` *(proposed)* | |
+| Nostr | `github.com/coder/websocket` and `github.com/btcsuite/btcd/btcec/v2` (BIP-340 Schnorr) | **Decided.** A small in-repo client (bech32, event ID, signature check, one-shot REQ) instead of `go-nostr`, which pulls about 20 modules. |
 | Packaging | Docker image (`linux/amd64` + `linux/arm64`) | See Deployment below |
 | License | AGPL-3.0 | **Decided.** See `LICENSE`. |
 
@@ -510,7 +510,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 11. ~~**Podcast keep destination.**~~ **Decided (2026-10-09):** Karakeep by default, plus a per-user multi-select like video's so other destinations can be added later through the `Destination` interface. No second podcast adapter in v1.
 12. ~~**Markdown export target.**~~ **Decided (2026-10-09):** a mounted volume only. Siftstr writes `/data/briefings/<username>/YYYY-MM-DD.md` (the day is in the user's timezone) and the operator bind-mounts that folder to whatever Nextcloud or Obsidian syncs. No WebDAV in v1. The template is fixed and built in (not user-editable): YAML frontmatter (date, counts), a Today section, then a Backlog section, one entry per item with title, source link, summary, and an outcome line once known. `/read` renders the same data with the same structure.
 13. ~~**Network reachability.**~~ **Decided (2026-10-09):** the user gives Siftstr the address the scheduled task will use, in `SIFTSTR_BASE_URL`. It can be a local address with a port (`http://192.168.1.20:8080`) or an external IP or domain, and which one is the operator's call. Siftstr builds the work package's absolute URLs from it and does not check how reachable it is. The `Secure` cookie flag is set only when the URL is `https://`. The README should describe the common setups (LAN, VPN, reverse proxy, tunnel) without recommending one.
-14. **Nostr configuration:** relays, followed npubs, hashtags/topics. How does the firehose case map onto `digest`?
+14. ~~**Nostr configuration.**~~ **Decided (2026-10-09):** one relay list per user, stored in the user's `nostr` connection and shared by every source. Sources are explicit followed npubs only (notes, kind 1, and long-form articles, kind 30023); no hashtag or topic subscriptions and no contact-list import in v1. There is no firehose special case: each npub is a source with the normal `granularity`, `max_depth` and `carryover` settings, so a busy npub is set to `digest` by the user. Nostr events carry no source-type logic in triage.
 15. ~~**Day boundaries.**~~ **Decided (2026-10-09):** the timezone is a per-user setting (`users.timezone`, defaulting to `TZ` for new users). Everything stored in the database is UTC, and times are converted to the user's timezone only at the edges: when deciding which day a morning run belongs to, and when rendering. If a run fails or is skipped, nothing changes: pending items stay pending, the previous briefing stays current, and the next run summarizes everything still waiting. Carryover is applied at the start of that run, so a missed day does not expire items early.
 16. **Janitor and Backlog:** should items still untriaged in Backlog after 6 months be deleted silently?
 17. ~~**Single vs. multi-user.**~~ **Decided:** the architecture and data model are multi-user from day one. v1 runs with one bootstrapped user, and user management features are on the [roadmap](ROADMAP.md).
