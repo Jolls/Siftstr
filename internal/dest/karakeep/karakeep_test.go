@@ -72,6 +72,13 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"bookmarks": out})
+	case r.Method == "GET" && strings.HasPrefix(p, "/api/v1/bookmarks/"):
+		b := f.find(strings.TrimPrefix(p, "/api/v1/bookmarks/"))
+		if b == nil {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": b.ID, "note": b.Note, "summary": b.Summary})
 	case r.Method == "PATCH" && strings.HasPrefix(p, "/api/v1/bookmarks/"):
 		b := f.find(strings.TrimPrefix(p, "/api/v1/bookmarks/"))
 		if b == nil {
@@ -115,7 +122,7 @@ func TestSendLinkIsIdempotent(t *testing.T) {
 		t.Fatalf("%d bookmarks after three sends", len(f.marks))
 	}
 	b := f.marks[0]
-	if b.Summary != "deep" || !b.Archived || !b.Tags["sifted"] || !b.Tags["promoted"] {
+	if b.Summary != "Agent Summary: deep" || !b.Archived || !b.Tags["sifted"] || !b.Tags["promoted"] {
 		t.Fatalf("%+v", b)
 	}
 	if f.auth != "Bearer tok" {
@@ -172,5 +179,38 @@ func TestMissingURLIsPermanent(t *testing.T) {
 	var p interface{ Permanent() bool }
 	if !asPermanent(err, &p) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSummaryMerge(t *testing.T) {
+	cases := []struct{ name, current, want string }{
+		{"empty", "", "Agent Summary: new"},
+		{"ours is replaced", "Agent Summary: old", "Agent Summary: new"},
+		{"someone else's is kept", "Karakeep wrote this.", "Karakeep wrote this.\n\nAgent Summary: new"},
+		{"ours after theirs is replaced, theirs kept", "Karakeep wrote this.\n\nAgent Summary: old", "Karakeep wrote this.\n\nAgent Summary: new"},
+	}
+	for _, c := range cases {
+		if got := mergeSummary(c.current, "new"); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestExistingSummaryIsKeptAndSendingAgainDoesNotStack(t *testing.T) {
+	f, d := setup(t)
+	f.marks = append(f.marks, &bm{ID: "b1", URL: "https://example.com/a", Summary: "My own words.", Tags: map[string]bool{}})
+	it := dest.Item{ID: "itm_1", URL: "https://example.com/a", Summary: "deep"}
+	for i := 0; i < 3; i++ {
+		if err := d.Send(context.Background(), it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := f.marks[0].Summary; got != "My own words.\n\nAgent Summary: deep" {
+		t.Fatalf("got %q", got)
+	}
+	it.Summary = "deeper" // a later keep after promote
+	_ = d.Send(context.Background(), it)
+	if got := f.marks[0].Summary; got != "My own words.\n\nAgent Summary: deeper" {
+		t.Fatalf("got %q", got)
 	}
 }

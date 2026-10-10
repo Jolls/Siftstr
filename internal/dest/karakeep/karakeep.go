@@ -20,6 +20,10 @@ import (
 
 const markerPrefix = "siftstr:"
 
+// SummaryPrefix starts every summary Siftstr writes. It is how Siftstr tells
+// its own summary from one that Karakeep or the user wrote.
+const SummaryPrefix = "Agent Summary: "
+
 // Destination creates or updates a bookmark.
 type Destination struct {
 	base, token string
@@ -47,8 +51,29 @@ func (d *Destination) header() map[string]string {
 }
 
 type bookmark struct {
-	ID   string `json:"id"`
-	Note string `json:"note"`
+	ID      string `json:"id"`
+	Note    string `json:"note"`
+	Summary string `json:"summary"`
+}
+
+// mergeSummary returns what the bookmark's summary should be, given what it
+// is now. A summary that is empty or begins with our prefix is ours to
+// replace. Anything else is someone else's and is kept, with ours after it. If
+// ours is already there after other text (an earlier send), only that part is
+// replaced, so sending again never stacks copies.
+func mergeSummary(current, ours string) string {
+	ours = SummaryPrefix + ours
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return ours
+	}
+	if i := strings.Index(current, SummaryPrefix); i >= 0 {
+		if i == 0 {
+			return ours
+		}
+		return strings.TrimRight(current[:i], " \n") + "\n\n" + ours
+	}
+	return current + "\n\n" + ours
 }
 
 // Send implements dest.Destination.
@@ -66,8 +91,12 @@ func (d *Destination) Send(ctx context.Context, item dest.Item) error {
 	if err != nil {
 		return err
 	}
+	var cur bookmark
+	if _, err := dest.Call(ctx, d.hc, http.MethodGet, d.base+"/api/v1/bookmarks/"+url.PathEscape(id), d.header(), nil, &cur); err != nil {
+		return err
+	}
 	if _, err := dest.Call(ctx, d.hc, http.MethodPatch, d.base+"/api/v1/bookmarks/"+url.PathEscape(id), d.header(),
-		map[string]any{"summary": item.Summary, "archived": item.Archived}, nil); err != nil {
+		map[string]any{"summary": mergeSummary(cur.Summary, item.Summary), "archived": item.Archived}, nil); err != nil {
 		return err
 	}
 	if len(item.Tags) == 0 {
@@ -85,7 +114,7 @@ func (d *Destination) Send(ctx context.Context, item dest.Item) error {
 func (d *Destination) ensureLink(ctx context.Context, item dest.Item) (string, error) {
 	var b bookmark
 	_, err := dest.Call(ctx, d.hc, http.MethodPost, d.base+"/api/v1/bookmarks", d.header(),
-		map[string]any{"type": "link", "url": item.URL, "title": item.Title, "archived": item.Archived, "summary": item.Summary}, &b)
+		map[string]any{"type": "link", "url": item.URL, "title": item.Title}, &b)
 	if err == nil && b.ID == "" {
 		err = errors.New("karakeep returned no bookmark id")
 	}
@@ -108,7 +137,7 @@ func (d *Destination) ensureNote(ctx context.Context, item dest.Item) (string, e
 	}
 	var b bookmark
 	_, err := dest.Call(ctx, d.hc, http.MethodPost, d.base+"/api/v1/bookmarks", d.header(),
-		map[string]any{"type": "text", "text": item.Summary, "title": item.Title, "note": marker, "archived": item.Archived, "summary": item.Summary}, &b)
+		map[string]any{"type": "text", "text": item.Summary, "title": item.Title, "note": marker}, &b)
 	if err == nil && b.ID == "" {
 		err = errors.New("karakeep returned no bookmark id")
 	}
