@@ -51,6 +51,7 @@ internal/briefing/      builds the daily briefing; renders /read and the markdow
 internal/ingest/        miniflux/, nostr/
 internal/dest/          miniflux/, karakeep/, metube/, youtube/  (Destination impls)
 internal/outbox/        queue and workers
+internal/janitor/       six-month cleanup and the daily database snapshot
 internal/store/         SQLite access and embedded migrations
 web/static/             Pico.css, app.css, later htmx, gestures.js, queue.js (action queue + sender)
 web/templates/          html/template files (base, login, items); embedded via web/embed.go

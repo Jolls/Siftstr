@@ -210,7 +210,7 @@ Each entry is a snapshot of what to send (URL, title, summary, tags, Miniflux en
 
 Failures retry with exponential backoff (1 minute, doubling, capped at 6 hours) up to 10 attempts, then the entry stops and keeps its `last_error`. A stop after 10 attempts is shown as **paused**, and a stop that a retry cannot fix (below) as **failed**; both can be retried or dismissed from Settings, Activity. Only a 400 or 422 reply, an item with no URL, or a connection that was removed fails at once; a rejected credential or a server that is down retries, so fixing the token in Settings lets the entry through. Error text never includes a reply body or a secret.
 
-**Activity.** `/settings/activity` lists the user's recent outbox entries (destination, item, status queued / retrying / done / paused / failed, tries, last error) with Retry and Dismiss on stopped ones. Retry puts the entry back in the queue with a fresh attempt count and the same dedupe key, so it is still sent at most once. Dismiss hides it and sends nothing. While any stopped entry is not dismissed, every page shows an alert linking to Activity. Cleanup of old entries belongs to the janitor (Phase 8). Redirects are not followed, a missing secret fails at once (except MeTube's optional token), and a MeTube reply of `status: error` fails at once.
+**Activity.** `/settings/activity` lists the user's recent outbox entries (destination, item, status queued / retrying / done / paused / failed, tries, last error) with Retry and Dismiss on stopped ones. Retry puts the entry back in the queue with a fresh attempt count and the same dedupe key, so it is still sent at most once. Dismiss hides it and sends nothing. While any stopped entry is not dismissed, every page shows an alert linking to Activity. The janitor deletes old entries with everything else (§8). Redirects are not followed, a missing secret fails at once (except MeTube's optional token), and a MeTube reply of `status: error` fails at once.
 
 | Outcome | Miniflux | Karakeep | Video and podcast destinations (multi-select) |
 |---|---|---|---|
@@ -249,7 +249,8 @@ type Destination interface {
 
 - **Ingest timer** (e.g. every 30 minutes): keeps adding new Miniflux entries and Nostr events to the database as `pending_light`. Whatever is there when Claude asks for work gets summarized. Nothing triggers ingestion on demand.
 - **Release timer** (e.g. every minute): releases actions whose hold has ended and sends their write-backs.
-- **Janitor** (daily): deletes data older than 6 months.
+- **Janitor** (daily, per user; also once at startup): deletes the user's workflow rows older than 6 months, by `created_at`: items (including ones never triaged, see Q16), actions (`received_at`), outbox entries, runs with their `run_items` (`started_at`), digests with no remaining items (`batch_date`, since they have no `created_at`), and expired sessions. It never touches sources, connections or settings, and a second run the same day deletes nothing. Because the source entry stays unread upstream, a deleted item can be ingested again if it is still inside the source's `max_age_days` window.
+- **Backup** (daily, instance-wide; also once at startup): `VACUUM INTO` writes `/data/backups/siftstr-YYYY-MM-DD.db` (UTC day) through a temp file and a rename, skips the day if the file exists, and keeps the newest 7 (Q22).
 
 ### Morning: the one Claude scheduled task (e.g. 06:00)
 
@@ -450,7 +451,7 @@ Siftstr ships as **one generic Docker image**, run with plain Docker or Compose 
 
 **Image**
 - Multi-stage build: compile with `CGO_ENABLED=0`, then copy the static binary into a minimal runtime image (`gcr.io/distroless/static` or `scratch` with CA certificates and tzdata).
-- Built for `linux/amd64` and `linux/arm64`, which covers typical servers, Raspberry Pis, and StartOS hardware.
+- Built for `linux/amd64` and `linux/arm64`, which covers typical servers, Raspberry Pis, and StartOS hardware. CI (`.github/workflows/release.yml`) builds both with `docker buildx` and publishes to `ghcr.io/jolls/siftstr` when a `v*` tag is pushed, tagged with the version (`1.2.3`, `1.2`, and `latest` for non-prerelease tags).
 - Runs as a non-root user and needs no shell. Migrations and assets are embedded, so the image is just the binary.
 - The same binary provides the CLI (`siftstr serve`, `siftstr user add`, `siftstr user set-password`).
 
@@ -465,6 +466,7 @@ Siftstr ships as **one generic Docker image**, run with plain Docker or Compose 
 | `/data/siftstr.db` | SQLite database (WAL mode) |
 | `/data/secret.key` | Instance encryption key, generated on first start if `SIFTSTR_SECRET_KEY` isn't set |
 | `/data/briefings/<username>/` | Default markdown export target (can be bind-mounted to a Nextcloud/Obsidian folder) |
+| `/data/backups/` | Daily consistent database snapshots, newest 7 kept (no `secret.key`; back that up separately) |
 
 Everything that must survive a restart lives under `/data`, so a single named volume or bind mount is all an operator needs. Losing `secret.key` makes the saved upstream credentials unreadable (users would re-enter them), so it is backed up together with the database.
 
@@ -483,7 +485,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 
 **Backups**
 - Back up the whole `/data` directory.
-- SQLite runs in WAL mode, and copying the database file while Siftstr is writing can produce a broken copy. *Proposed:* Siftstr writes a periodic consistent snapshot with `VACUUM INTO /data/backup/siftstr.db`, so file-level backup tools (restic, borg, Nextcloud sync, StartOS) work without stopping the container.
+- SQLite runs in WAL mode, and copying the database file while Siftstr is writing can produce a broken copy. Siftstr writes a consistent snapshot once a day with `VACUUM INTO /data/backups/siftstr-YYYY-MM-DD.db` and keeps the newest 7 (Q22), so file-level backup tools (restic, borg, Nextcloud sync, StartOS) can copy `/data/backups/` without stopping the container. Snapshots hold the encrypted connection secrets but not `secret.key`, so a restore needs the key from the original `/data/secret.key` or `SIFTSTR_SECRET_KEY`.
 
 **What the repo ships**
 - A `Dockerfile` and an example `compose.yaml`: a named volume on `/data`, port 8080, and the bootstrap env vars, intended to sit behind the operator's existing reverse proxy.
@@ -512,13 +514,13 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 13. ~~**Network reachability.**~~ **Decided (2026-10-09):** the user gives Siftstr the address the scheduled task will use, in `SIFTSTR_BASE_URL`. It can be a local address with a port (`http://192.168.1.20:8080`) or an external IP or domain, and which one is the operator's call. Siftstr builds the work package's absolute URLs from it and does not check how reachable it is. The `Secure` cookie flag is set only when the URL is `https://`. The README should describe the common setups (LAN, VPN, reverse proxy, tunnel) without recommending one.
 14. ~~**Nostr configuration.**~~ **Decided (2026-10-09):** one relay list per user, stored in the user's `nostr` connection and shared by every source. Sources are explicit followed npubs only (notes, kind 1, and long-form articles, kind 30023); no hashtag or topic subscriptions and no contact-list import in v1. There is no firehose special case: each npub is a source with the normal `granularity`, `max_depth` and `carryover` settings, so a busy npub is set to `digest` by the user. Nostr events carry no source-type logic in triage.
 15. ~~**Day boundaries.**~~ **Decided (2026-10-09):** the timezone is a per-user setting (`users.timezone`, defaulting to `TZ` for new users). Everything stored in the database is UTC, and times are converted to the user's timezone only at the edges: when deciding which day a morning run belongs to, and when rendering. If a run fails or is skipped, nothing changes: pending items stay pending, the previous briefing stays current, and the next run summarizes everything still waiting. Carryover is applied at the start of that run, so a missed day does not expire items early.
-16. **Janitor and Backlog:** should items still untriaged in Backlog after 6 months be deleted silently?
+16. ~~**Janitor and Backlog.**~~ **Decided (2026-10-09):** the janitor deletes everything older than 6 months by `created_at`, including items still untriaged in Backlog. It is silent; the entries stay unread in the source service.
 17. ~~**Single vs. multi-user.**~~ **Decided:** the architecture and data model are multi-user from day one. v1 runs with one bootstrapped user, and user management features are on the [roadmap](ROADMAP.md).
 18. ~~**Prior art.**~~ **Decided (2026-10-09):** a web search found no project that combines Miniflux and Nostr ingest, a once-a-day Claude summary, and archive/promote/keep triage with write-back. The closest is **CondenseIt** (`wildlifechorus/condenseit`, MIT), an all-in-one digest reader: it fetches its own sources, calls an LLM itself (Ollama, OpenRouter, or an OpenAI-compatible endpoint), and ranks items from learned preferences, but has no Nostr support and no write-back. Siftstr is the integrating alternative: Miniflux and Nostr stay the system of record, decisions write back through the outbox to Karakeep, MeTube and Miniflux, and the only LLM step is one Claude run a day outside the app. Other digest tools (rssdigest, RSSbrew, RSSBox) also summarize feeds themselves. CondenseIt's source handling (Reddit thresholds, GitHub Releases, podcast search) is worth a look when those sources come up. Karakeep is a destination, not a competitor. Also considered earlier: **Readstr** (Start9 registry; upstream `privkeyio/readstr`), ruled out because it's a human-facing UI with no documented API.
 19. ~~**Undo grace period.**~~ **Decided:** server-side hold, 15 minutes from receipt (configurable). Undo after the hold ends is refused, not reversed upstream; the client shows the item's real state.
 20. ~~**Multiple devices.**~~ **Decided (2026-10-09):** last-write-wins by client timestamp. A later action replaces an earlier one unless the earlier action's effects were already released to the outbox, in which case it is rejected with the item's current state.
 21. ~~**StartOS package location.**~~ **Decided:** a separate repo. This repo stays platform-neutral.
-22. **Backup snapshot:** confirm the periodic `VACUUM INTO` snapshot approach, and decide how often it runs.
+22. ~~**Backup snapshot.**~~ **Decided (2026-10-09):** the janitor timer takes a `VACUUM INTO` snapshot once a day into `/data/backups/siftstr-YYYY-MM-DD.db` and keeps the newest 7. The snapshot is instance-wide (the whole database), not per user.
 
 ---
 

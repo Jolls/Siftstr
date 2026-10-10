@@ -30,6 +30,7 @@ import (
 	destminiflux "github.com/Jolls/Siftstr/internal/dest/miniflux"
 	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
 	"github.com/Jolls/Siftstr/internal/ingest/nostr"
+	"github.com/Jolls/Siftstr/internal/janitor"
 	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/scheduler"
@@ -147,7 +148,6 @@ func serve() error {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	// More jobs register here as later phases add them (outbox, janitor).
 	sched := scheduler.New(enabledUsers(st), nil)
 	mf := &miniflux.Ingester{DB: st.DB(), Conns: conns, New: miniflux.ClientFactory, Now: time.Now}
 	if err := sched.Register(scheduler.Job{
@@ -204,6 +204,34 @@ func serve() error {
 			res, err := ob.Run(ctx, userID)
 			if res.Done > 0 || res.Failed > 0 || res.Retried > 0 {
 				log.Printf("outbox: %d sent, %d retrying, %d failed", res.Done, res.Retried, res.Failed)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	jan := &janitor.Janitor{DB: st.DB(), BackupDir: filepath.Join(cfg.DataDir, "backups"), Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		// Deletes each user's workflow rows older than six months.
+		Name: "janitor", Interval: 24 * time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := jan.Prune(ctx, userID)
+			if err == nil && (res.Items+res.Digests+res.Actions+res.Outbox+res.Runs) > 0 {
+				log.Printf("janitor: deleted %d items, %d digests, %d actions, %d outbox entries, %d runs",
+					res.Items, res.Digests, res.Actions, res.Outbox, res.Runs)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	if err := sched.Register(scheduler.Job{
+		// One consistent snapshot of the whole database per day; keeps the newest 7.
+		Name: "backup", Interval: 24 * time.Hour, Scope: scheduler.Instance, RunOnStart: true,
+		Run: func(ctx context.Context, _ string) error {
+			wrote, err := jan.Snapshot(ctx)
+			if wrote {
+				log.Printf("backup: wrote a database snapshot to %s", jan.BackupDir)
 			}
 			return err
 		},

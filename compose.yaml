@@ -3,7 +3,7 @@
 services:
   siftstr:
     build: .
-    # image: ghcr.io/jolls/siftstr:latest   # once images are published
+    # image: ghcr.io/jolls/siftstr:latest   # published on release tags
     restart: unless-stopped
     ports:
       - "8080:8080"
