@@ -13,7 +13,9 @@ import (
 	"testing"
 
 	"github.com/Jolls/Siftstr/internal/auth"
+	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/store"
@@ -25,6 +27,8 @@ type env struct {
 	srv  *httptest.Server
 	auth *auth.Service
 	st   *store.Store
+	// briefDir is where the briefing files go.
+	briefDir string
 }
 
 func setup(t *testing.T, ready func(context.Context) error, secure bool) *env {
@@ -45,13 +49,14 @@ func setup(t *testing.T, ready func(context.Context) error, secure bool) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := New(Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), Dest: &writeback.Settings{DB: st.DB()}, SecureCookies: secure})
+	briefDir := t.TempDir()
+	h, err := New(Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), briefDir), SecureCookies: secure})
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &env{srv: srv, auth: a, st: st}
+	return &env{srv: srv, auth: a, st: st, briefDir: briefDir}
 }
 
 // client returns an HTTP client with a cookie jar that does not follow redirects.

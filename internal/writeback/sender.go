@@ -33,7 +33,14 @@ func (s *Sender) Handle(ctx context.Context, e outbox.Entry) error {
 		return dest.Permanent(fmt.Errorf("no destination for %q", conn.Kind))
 	}
 	secret, err := s.Conns.Secret(ctx, e.UserID, e.ConnectionID)
-	if err != nil && !errors.Is(err, connections.ErrNoSecret) {
+	switch {
+	case errors.Is(err, connections.ErrNoSecret):
+		// MeTube's token is optional. The others cannot work without one, and
+		// sending an empty token would only earn a retried 401.
+		if conn.Kind != MeTube {
+			return dest.Permanent(fmt.Errorf("no secret is saved for the %s connection", conn.Kind))
+		}
+	case err != nil:
 		return err // unreadable: retry, the user may re-enter it
 	}
 	var item dest.Item

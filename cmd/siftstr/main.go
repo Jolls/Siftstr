@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,6 +21,7 @@ import (
 	_ "time/tzdata" // zone data inside the binary; the runtime image has none
 
 	"github.com/Jolls/Siftstr/internal/auth"
+	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/config"
 	"github.com/Jolls/Siftstr/internal/connections"
 	"github.com/Jolls/Siftstr/internal/dest"
@@ -134,7 +136,7 @@ func serve() error {
 	rn := runs.New(st.DB())
 	rn.OnDeep = planner.OnDeep
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, SecureCookies: cfg.SecureCookies(),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(),
 	})
 	if err != nil {
 		return err

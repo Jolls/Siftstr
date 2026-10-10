@@ -533,3 +533,17 @@ func offeredBy(ctx context.Context, tx *sql.Tx, runID, userID string) (map[strin
 	}
 	return out, rows.Err()
 }
+
+// Day returns the local date a run belongs to, for naming that day's
+// briefing. A run from before days were recorded gets the user's date now.
+func (s *Service) Day(ctx context.Context, userID, runID string) (string, error) {
+	var day string
+	err := s.DB.QueryRowContext(ctx, `SELECT day FROM runs WHERE id = ? AND user_id = ?`, runID, userID).Scan(&day)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrRunNotFound
+	}
+	if err != nil || day != "" {
+		return day, err
+	}
+	return s.Today(ctx, userID)
+}

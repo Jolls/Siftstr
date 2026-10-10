@@ -1,0 +1,37 @@
+{{define "content"}}
+<h1>Activity</h1>
+{{template "settingsnav" .}}
+<p>Your decisions reach Miniflux, Karakeep and MeTube a few minutes after the undo window. Each update is listed here. A <strong>paused</strong> update ran out of retries, for example while a service was down. A <strong>failed</strong> update needs a fix first, such as a corrected URL or token under Destinations. Retry sends it again. Dismiss hides it without sending anything.</p>
+
+{{if .Activity}}
+<table class="activity">
+  <thead>
+    <tr><th>When</th><th>To</th><th>Item</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Activity}}
+    <tr>
+      <td>{{.When}}</td>
+      <td>{{.Destination}}</td>
+      <td>{{.Title}}{{if .Error}}<br><small class="error">{{.Error}}</small>{{end}}</td>
+      <td>{{.Status}}{{if .Attempts}} ({{.Attempts}} {{if eq .Attempts 1}}try{{else}}tries{{end}}){{end}}</td>
+      <td>
+        {{if .Stopped}}
+        <form method="post" action="/settings/activity/{{.ID}}/retry" class="inline">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button type="submit">Retry</button>
+        </form>
+        <form method="post" action="/settings/activity/{{.ID}}/dismiss" class="inline">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button type="submit" class="secondary outline">Dismiss</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>Nothing sent yet.</p>
+{{end}}
+{{end}}

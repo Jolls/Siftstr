@@ -48,7 +48,6 @@ The data model, auth, scoping, and per-user connections already support multiple
 - **Transcription** for podcasts and videos, so deep summaries can use the actual content.
 - **More destinations** for kept items (e.g. other downloaders or podcast apps) through the `Destination` interface.
 - **YouTube**: adding kept videos to a user-owned playlist (Watch Later is closed to the API; needs OAuth).
-- **Retrying or dismissing failed outbox entries** from the UI. In v1 a failed entry stays in the table with its `last_error`.
 - **Viewing past briefings in the app.** The markdown log covers this for now.
 - **Reversing a write-back** when undo happens after the hold has ended (e.g. delete the Karakeep bookmark).
 - **Karakeep as a source**, if a real use case turns up.

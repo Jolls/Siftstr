@@ -208,7 +208,9 @@ Each entry is a snapshot of what to send (URL, title, summary, tags, Miniflux en
 - **Karakeep:** creating a link bookmark is de-duplicated by Karakeep itself (by URL), after which Siftstr sets the wanted summary and archived flag and attaches tags; every step sets a desired state. A text note (a digest) has no URL, so it carries a `siftstr:<id>` marker in its note field and Siftstr searches for that before creating. This relies on Karakeep's search index being up to date; if it lags, a retry could create a second note.
 - **MeTube:** `GET /history` is checked for the URL (queued, pending or done) before `POST /add`.
 
-Failures retry with exponential backoff (1 minute, doubling, capped at 6 hours) up to 10 attempts, then the entry is marked `failed` and keeps its `last_error`. Only a 400 or 422 reply, an item with no URL, or a connection that was removed fails at once; a rejected credential or a server that is down retries, so fixing the token in Settings lets the entry through. Error text never includes a reply body or a secret.
+Failures retry with exponential backoff (1 minute, doubling, capped at 6 hours) up to 10 attempts, then the entry stops and keeps its `last_error`. A stop after 10 attempts is shown as **paused**, and a stop that a retry cannot fix (below) as **failed**; both can be retried or dismissed from Settings, Activity. Only a 400 or 422 reply, an item with no URL, or a connection that was removed fails at once; a rejected credential or a server that is down retries, so fixing the token in Settings lets the entry through. Error text never includes a reply body or a secret.
+
+**Activity.** `/settings/activity` lists the user's recent outbox entries (destination, item, status queued / retrying / done / paused / failed, tries, last error) with Retry and Dismiss on stopped ones. Retry puts the entry back in the queue with a fresh attempt count and the same dedupe key, so it is still sent at most once. Dismiss hides it and sends nothing. While any stopped entry is not dismissed, every page shows an alert linking to Activity. Cleanup of old entries belongs to the janitor (Phase 8). Redirects are not followed, a missing secret fails at once (except MeTube's optional token), and a MeTube reply of `status: error` fails at once.
 
 | Outcome | Miniflux | Karakeep | Video and podcast destinations (multi-select) |
 |---|---|---|---|
@@ -271,6 +273,11 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 - It is written once the morning summaries arrive.
 - It is rewritten with final outcomes (archived / promoted / kept / carried over) at the next morning run, before the new day's file starts. The finished file is the durable log of that day.
 - It is generated from the same data and template as `/read`, so the file matches what the user saw.
+- It lives at `/data/briefings/<username>/YYYY-MM-DD.md` (the day is the user's local date), written atomically so a sync client never sees half a file. A failed write is logged and never fails the run or the summary submission.
+- Layout: YAML frontmatter (`date`, `today`, `backlog`, `final`), then `## Today` and `## Backlog`, one `###` entry per item or digest (linked title, source and media type, outcome, summary). The summaries are Claude's markdown, inserted as is.
+- Outcomes: archived, kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
+- Closing: `POST /api/v1/runs` runs carryover and then rewrites every earlier summarized day not yet closed with `final: true`. The last closed day is remembered in `user_settings` (`briefing_finalized_day`); the file is never read back.
+- `/read` renders the same Today and Backlog from the same query: headings and `<article>` only, with no buttons, forms or badges in the text flow.
 
 ---
 
@@ -345,7 +352,8 @@ actions        action_id (client UUID, PK), user_id, subject_type[item|digest],
 
 outbox         id, user_id, action_id, connection_id, op, payload, status,
                attempts, last_error, created_at, done_at,
-               next_attempt_at, dedupe_key  -- UNIQUE(user_id, dedupe_key)
+               next_attempt_at, dedupe_key, permanent, dismissed_at
+               -- UNIQUE(user_id, dedupe_key)
 
 runs           id, user_id, started_at, summaries_at, finished_at, stats
 
@@ -371,6 +379,7 @@ An item's current outcome is derived from its latest effective action. The janit
 | `/read` | Today's summaries as one clean, linear page that works with Android reading mode and TTS |
 | `/settings/sources` | Per-source settings table |
 | `/settings/prompts` | Global and per-source summarization instructions |
+| `/settings/activity` | Outbox log: stopped updates with Retry and Dismiss |
 | `/settings/destinations` | Video destinations, export target, upstream connections |
 | `/login` | Login |
 
@@ -499,7 +508,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 9. ~~**Karakeep summary field.**~~ **Decided (2026-10-09):** Karakeep's bookmark create and update accept a `summary` field (checked against its schema in the Karakeep source), and tags are attached with a separate call. Siftstr's summary is prefixed `Agent Summary: ` and replaces only a summary that is empty or already ours; other text is kept and ours appended (changed after the first manual test). Karakeep's AI tagging stays on and Siftstr only adds its own tags (`sifted`, plus `promoted` or `kept`).
 10. ~~**Promote and Miniflux read state.**~~ **Decided (2026-10-09):** mark read when the promote's hold ends. The entry leaves the user's Miniflux unread list then, and the deep summary and Karakeep save follow later.
 11. ~~**Podcast keep destination.**~~ **Decided (2026-10-09):** Karakeep by default, plus a per-user multi-select like video's so other destinations can be added later through the `Destination` interface. No second podcast adapter in v1.
-12. **Markdown export target:** a mounted volume that Nextcloud syncs, or a WebDAV upload? Also need the file name pattern and template.
+12. ~~**Markdown export target.**~~ **Decided (2026-10-09):** a mounted volume only. Siftstr writes `/data/briefings/<username>/YYYY-MM-DD.md` (the day is in the user's timezone) and the operator bind-mounts that folder to whatever Nextcloud or Obsidian syncs. No WebDAV in v1. The template is fixed and built in (not user-editable): YAML frontmatter (date, counts), a Today section, then a Backlog section, one entry per item with title, source link, summary, and an outcome line once known. `/read` renders the same data with the same structure.
 13. ~~**Network reachability.**~~ **Decided (2026-10-09):** the user gives Siftstr the address the scheduled task will use, in `SIFTSTR_BASE_URL`. It can be a local address with a port (`http://192.168.1.20:8080`) or an external IP or domain, and which one is the operator's call. Siftstr builds the work package's absolute URLs from it and does not check how reachable it is. The `Secure` cookie flag is set only when the URL is `https://`. The README should describe the common setups (LAN, VPN, reverse proxy, tunnel) without recommending one.
 14. **Nostr configuration:** relays, followed npubs, hashtags/topics. How does the firehose case map onto `digest`?
 15. ~~**Day boundaries.**~~ **Decided (2026-10-09):** the timezone is a per-user setting (`users.timezone`, defaulting to `TZ` for new users). Everything stored in the database is UTC, and times are converted to the user's timezone only at the edges: when deciding which day a morning run belongs to, and when rendering. If a run fails or is skipped, nothing changes: pending items stay pending, the previous briefing stays current, and the next run summarizes everything still waiting. Carryover is applied at the start of that run, so a missed day does not expire items early.

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"github.com/Jolls/Siftstr/internal/outbox"
 	"net/http"
 	"slices"
 	"strconv"
@@ -25,7 +26,7 @@ var destinationKinds = []ui.Destination{
 	{Kind: "metube", Label: "MeTube", Help: "Where kept videos are sent to download.", SecretLabel: "Secret (optional)"},
 }
 
-var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked."}
+var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked.", "retried": "Queued to send again.", "dismissed": "Dismissed."}
 
 func (s *server) settingsPage(sess *session, req *http.Request, title string) ui.Page {
 	p := s.page(sess, "settings", title)
@@ -291,6 +292,46 @@ func (s *server) timezoneSave(w http.ResponseWriter, req *http.Request, sess *se
 		return
 	}
 	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+}
+
+func (s *server) activityForm(w http.ResponseWriter, req *http.Request, sess *session) {
+	rows, err := s.Outbox.Recent(req.Context(), sess.User.ID, 100)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	loc, err := time.LoadLocation(sess.User.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	p := s.settingsPage(sess, req, "Activity")
+	for _, r := range rows {
+		p.Activity = append(p.Activity, ui.ActivityRow{
+			ID: r.ID, Destination: r.Op, Title: r.Title, Status: r.Status, Attempts: r.Attempts,
+			When: r.CreatedAt.In(loc).Format("2006-01-02 15:04"), Error: r.LastError, Stopped: r.Stopped,
+		})
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.ui.Render(w, http.StatusOK, "settings_activity", p)
+}
+
+func (s *server) activityRetry(w http.ResponseWriter, req *http.Request, sess *session) {
+	s.activityChange(w, req, s.Outbox.Retry(req.Context(), sess.User.ID, req.PathValue("id")), "retried")
+}
+
+func (s *server) activityDismiss(w http.ResponseWriter, req *http.Request, sess *session) {
+	s.activityChange(w, req, s.Outbox.Dismiss(req.Context(), sess.User.ID, req.PathValue("id"), time.Now()), "dismissed")
+}
+
+func (s *server) activityChange(w http.ResponseWriter, req *http.Request, err error, notice string) {
+	switch {
+	case errors.Is(err, outbox.ErrNotFound):
+		http.NotFound(w, req) // another user's entry looks the same as a missing one
+	case err != nil:
+		serverError(w)
+	default:
+		http.Redirect(w, req, "/settings/activity?notice="+notice, http.StatusSeeOther)
+	}
 }
 
 func (s *server) keysForm(w http.ResponseWriter, req *http.Request, sess *session) {

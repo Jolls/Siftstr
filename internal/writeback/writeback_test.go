@@ -466,3 +466,18 @@ func TestUsersNeverReachEachOthersConnections(t *testing.T) {
 	}
 	eq(t, f.kinds(), []string{"karakeep"}) // u1 has no Miniflux connection
 }
+
+func TestConnectionWithoutSecretFailsAtOnce(t *testing.T) {
+	f := newFixture(t)
+	f.connect("u1", Miniflux, Karakeep)
+	f.exec(`UPDATE connections SET secret_enc = NULL WHERE kind = 'karakeep'`)
+	f.item("i1", "src1", "article", "light", "41")
+	f.act("keep", "i1")
+	f.release()
+	f.drain()
+	var status, lastErr string
+	_ = f.st.DB().QueryRow(`SELECT status, last_error FROM outbox WHERE op = 'karakeep'`).Scan(&status, &lastErr)
+	if status != "failed" || !strings.Contains(lastErr, "no secret") {
+		t.Fatalf("%s %q", status, lastErr)
+	}
+}

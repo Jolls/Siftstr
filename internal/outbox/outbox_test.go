@@ -164,3 +164,16 @@ func TestBackoffGrowsAndCaps(t *testing.T) {
 		t.Fatalf("backoff not capped: %v", Backoff(50))
 	}
 }
+
+func TestSameSecondEntriesKeepInsertionOrder(t *testing.T) {
+	f := newFixture(t)
+	for _, k := range []string{"zz", "aa", "mm"} { // ids sort differently from insertion
+		f.enqueue(t, "u1", k)
+	}
+	f.db.Run(context.Background(), "u1")
+	for i, k := range []string{"zz", "aa", "mm"} {
+		if f.got[i].Key != k {
+			t.Fatalf("order: %+v", f.got)
+		}
+	}
+}
