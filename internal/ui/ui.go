@@ -38,6 +38,9 @@ type Page struct {
 	NewKey       string // a just-created API key, shown once
 	Prompts      []PromptField
 	Destinations []Destination
+	NostrRelays  string // /settings/nostr: one relay per line
+	NostrNpubs   string // one npub per line
+	NostrSaved   bool   // a Nostr connection exists
 	Keep         []KeepChoice
 	Activity     []ActivityRow
 
@@ -162,6 +165,7 @@ var pageFiles = map[string][]string{
 	"settings_prompts":      {"settings_nav.html", "settings_prompts.html"},
 	"settings_keys":         {"settings_nav.html", "settings_keys.html"},
 	"settings_activity":     {"settings_nav.html", "settings_activity.html"},
+	"settings_nostr":        {"settings_nav.html", "settings_nostr.html"},
 }
 
 // New parses the embedded templates. Each page gets its own set so that

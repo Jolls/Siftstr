@@ -12,6 +12,7 @@ import (
 
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/ingest/nostr"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/ui"
@@ -394,4 +395,64 @@ func (s *server) keyRevoke(w http.ResponseWriter, req *http.Request, sess *sessi
 	default:
 		http.Redirect(w, req, "/settings/keys?notice=revoked", http.StatusSeeOther)
 	}
+}
+
+func (s *server) nostrForm(w http.ResponseWriter, req *http.Request, sess *session) {
+	s.renderNostr(w, req, sess, http.StatusOK, "", nil)
+}
+
+// renderNostr shows the saved relays and npubs, or, after a rejected save,
+// what the user typed so nothing is lost.
+func (s *server) renderNostr(w http.ResponseWriter, req *http.Request, sess *session, status int, msg string, typed *[2]string) {
+	cur, found, err := s.existing(req, sess.User.ID, "nostr")
+	if err != nil {
+		serverError(w)
+		return
+	}
+	p := s.settingsPage(sess, req, "Nostr")
+	p.Error, p.NostrSaved = msg, found
+	if typed != nil {
+		p.NostrRelays, p.NostrNpubs = typed[0], typed[1]
+	} else if found {
+		cfg := nostr.ParseConfig(cur.Config)
+		p.NostrRelays = strings.Join(cfg.Relays, "\n")
+		npubs := make([]string, len(cfg.Npubs))
+		for i, k := range cfg.Npubs {
+			npubs[i] = nostr.Npub(k)
+		}
+		p.NostrNpubs = strings.Join(npubs, "\n")
+	}
+	s.ui.Render(w, status, "settings_nostr", p)
+}
+
+func (s *server) nostrSave(w http.ResponseWriter, req *http.Request, sess *session) {
+	relays, npubs := req.PostFormValue("relays"), req.PostFormValue("npubs")
+	cfg, err := nostr.NewConfig(relays, npubs)
+	if err != nil {
+		s.renderNostr(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".", &[2]string{relays, npubs})
+		return
+	}
+	cur, found, err := s.existing(req, sess.User.ID, "nostr")
+	if err == nil && found {
+		_, err = s.Conns.Update(req.Context(), sess.User.ID, cur.ID, connections.UpdateInput{Config: cfg.JSON()})
+	} else if err == nil {
+		_, err = s.Conns.Create(req.Context(), sess.User.ID, connections.Input{Kind: "nostr", Config: cfg.JSON()})
+	}
+	if err != nil {
+		serverError(w)
+		return
+	}
+	http.Redirect(w, req, "/settings/nostr?notice=saved", http.StatusSeeOther)
+}
+
+func (s *server) nostrDelete(w http.ResponseWriter, req *http.Request, sess *session) {
+	cur, found, err := s.existing(req, sess.User.ID, "nostr")
+	if err == nil && found {
+		err = s.Conns.Delete(req.Context(), sess.User.ID, cur.ID)
+	}
+	if err != nil {
+		serverError(w)
+		return
+	}
+	http.Redirect(w, req, "/settings/nostr?notice=disconnected", http.StatusSeeOther)
 }
