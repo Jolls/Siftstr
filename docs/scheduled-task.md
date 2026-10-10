@@ -40,6 +40,22 @@ Create a scheduled task in Claude, scheduled for the morning (the day boundary i
 
 Run the task once by hand. The reply should say how many summaries were accepted. Then open Siftstr: the items should now be in **Today**. If a run fails, nothing is lost: pending items stay pending, and the next run summarizes everything still waiting.
 
+### Troubleshooting: TLS errors from a private CA
+
+If Siftstr sits behind a certificate signed by a private CA (StartOS does this), `curl` can fail with exit code 60 even though you hold the CA file. Don't reach for `-k` / `--insecure`: that turns off certificate verification entirely, so anyone on the path could read the bearer key.
+
+Instead, pass the CA file and, if needed, skip only the revocation lookup:
+
+```sh
+curl --cacert ca.crt --ssl-no-revoke -H "Authorization: Bearer <KEY>" <BASE_URL>/api/v1/ping
+```
+
+- `--cacert` makes curl trust only your CA. The chain, expiry, and hostname are all still checked.
+- `--ssl-no-revoke` matters on Windows, where curl uses schannel. Schannel fails when the CA publishes no revocation (CRL/OCSP) information, which private CAs usually don't, with "the revocation status is unknown". The flag skips only that lookup. Verification is otherwise unchanged.
+- The risk it leaves is small: a certificate that was revoked but is still valid would be accepted. For your own private CA on your own network, that is rarely a real threat. For a public CA, leave revocation checking on.
+- The certificate must also name the host you connect to. If it names a hostname and not the IP, connect by that name, using `--resolve <name>:<port>:<ip>` if DNS doesn't know it.
+- Git for Windows' bundled `curl` (OpenSSL) doesn't do the revocation check and needs no extra flag.
+
 ## Prompt
 
 ```
