@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 
+	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/web"
 )
 
@@ -18,6 +19,9 @@ type Page struct {
 	User   *User  // nil when logged out
 	CSRF   string
 	Error  string
+	// Problems is how many stopped upstream updates need attention; the base
+	// template shows an alert for it.
+	Problems int
 
 	// Item list pages (/today, /backlog).
 	Heading string
@@ -35,6 +39,19 @@ type Page struct {
 	Prompts      []PromptField
 	Destinations []Destination
 	Keep         []KeepChoice
+	Activity     []ActivityRow
+
+	// The /read page.
+	Day     string
+	Today   []briefing.Entry
+	Backlog []briefing.Entry
+}
+
+// ActivityRow is one outbox entry on /settings/activity.
+type ActivityRow struct {
+	ID, Destination, Title, Status, When, Error string
+	Attempts                                    int
+	Stopped                                     bool
 }
 
 // KeepChoice is one row of the "where kept items go" form: a media type and
@@ -139,10 +156,12 @@ type Renderer struct {
 var pageFiles = map[string][]string{
 	"login":                 {"login.html"},
 	"items":                 {"items.html"},
+	"read":                  {"read.html"},
 	"settings_sources":      {"settings_nav.html", "settings_sources.html"},
 	"settings_destinations": {"settings_nav.html", "settings_destinations.html"},
 	"settings_prompts":      {"settings_nav.html", "settings_prompts.html"},
 	"settings_keys":         {"settings_nav.html", "settings_keys.html"},
+	"settings_activity":     {"settings_nav.html", "settings_activity.html"},
 }
 
 // New parses the embedded templates. Each page gets its own set so that

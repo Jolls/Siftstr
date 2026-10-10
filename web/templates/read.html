@@ -1,0 +1,23 @@
+{{define "content"}}
+<h1>Read, {{.Day}}</h1>
+{{/*
+  One linear page for Android reading mode and text to speech: headings and
+  <article>s only. No buttons, forms or badges live in this flow.
+*/}}
+<section aria-labelledby="read-today">
+  <h2 id="read-today">Today</h2>
+  {{range .Today}}{{template "readentry" .}}{{else}}<p>Nothing was summarized today.</p>{{end}}
+</section>
+<section aria-labelledby="read-backlog">
+  <h2 id="read-backlog">Backlog</h2>
+  {{range .Backlog}}{{template "readentry" .}}{{else}}<p>Nothing carried over.</p>{{end}}
+</section>
+{{end}}
+
+{{define "readentry"}}
+<article class="read-entry">
+  <h3>{{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h3>
+  <p>{{.Source}}{{if .MediaType}}, {{.MediaType}}{{end}}{{if .Outcome}}, {{.Outcome}}{{end}}</p>
+  {{if .Summary}}<p class="summary">{{.Summary}}</p>{{end}}
+</article>
+{{end}}

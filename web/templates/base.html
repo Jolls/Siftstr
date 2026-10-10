@@ -28,6 +28,7 @@
       {{end}}
     </nav>
   </header>
+  {{if .Problems}}<aside class="container alert" role="alert"><a href="/settings/activity">{{.Problems}} update{{if ne .Problems 1}}s{{end}} to your other services could not be sent. Review and retry.</a></aside>{{end}}
   <main class="container">
 {{template "content" .}}
   </main>

@@ -100,7 +100,9 @@ type Runner struct {
 	MaxAttempts int // DefaultMaxAttempts if zero
 }
 
-// Run sends userID's due entries, oldest first. One entry failing does not
+// Run sends userID's due entries, oldest first. created_at only has second
+// resolution, so entries queued in the same second go in insertion order
+// (rowid), which keeps two effects on one upstream object in decision order. One entry failing does not
 // stop the others. A user's entries are only ever sent by one Run at a time
 // (the scheduler never overlaps a job with itself).
 func (r *Runner) Run(ctx context.Context, userID string) (Stats, error) {
@@ -113,7 +115,7 @@ func (r *Runner) Run(ctx context.Context, userID string) (Stats, error) {
 	rows, err := r.DB.QueryContext(ctx,
 		`SELECT id, COALESCE(action_id, ''), COALESCE(connection_id, ''), op, payload, COALESCE(dedupe_key, ''), attempts
 		 FROM outbox WHERE user_id = ? AND status = 'pending' AND next_attempt_at <= ?
-		 ORDER BY created_at, id`, userID, stamp(now))
+		 ORDER BY created_at, rowid`, userID, stamp(now))
 	if err != nil {
 		return st, err
 	}
@@ -145,8 +147,10 @@ func (r *Runner) Run(ctx context.Context, userID string) (Stats, error) {
 				attempts, stamp(r.Now()), e.ID, userID)
 			st.Done++
 		case (errors.As(herr, &perr) && perr.Permanent()) || attempts >= max:
-			_, err = r.DB.ExecContext(ctx, `UPDATE outbox SET status = 'failed', attempts = ?, last_error = ? WHERE id = ? AND user_id = ?`,
-				attempts, herr.Error(), e.ID, userID)
+			// permanent separates "a retry cannot fix this" from "ran out of
+			// retries": the Activity page calls the first failed, the second paused.
+			_, err = r.DB.ExecContext(ctx, `UPDATE outbox SET status = 'failed', attempts = ?, last_error = ?, permanent = ? WHERE id = ? AND user_id = ?`,
+				attempts, herr.Error(), errors.As(herr, &perr) && perr.Permanent(), e.ID, userID)
 			st.Failed++
 		default:
 			_, err = r.DB.ExecContext(ctx, `UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ? WHERE id = ? AND user_id = ?`,

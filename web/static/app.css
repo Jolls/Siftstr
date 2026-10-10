@@ -46,3 +46,7 @@ form.inline button { margin: 0; width: auto; padding: 0.25rem 0.75rem; }
 .sync { color: var(--pico-muted-color); }
 .sync[data-state="auth"] { color: var(--pico-del-color); }
 .notice { font-size: 0.8rem; color: var(--pico-del-color); }
+
+/* Alert for upstream updates that stopped. */
+.alert { padding: .5rem 0; }
+.alert a { color: var(--pico-del-color, #c62828); font-weight: 600; }

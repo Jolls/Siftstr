@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/auth"
+	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/triage"
@@ -40,6 +42,10 @@ type Deps struct {
 	Runs    *runs.Service
 	Triage  *triage.Service
 	Dest    *writeback.Settings // where kept videos and podcasts go
+	// Briefing builds /read and writes the daily markdown files.
+	Briefing *briefing.Service
+	// Outbox backs the Activity page and the alert for stopped entries.
+	Outbox *outbox.Log
 	// SecureCookies sets the Secure flag. It comes from SIFTSTR_BASE_URL, not
 	// from r.TLS, because TLS ends at the reverse proxy.
 	SecureCookies bool
@@ -56,6 +62,8 @@ type session struct {
 	User  auth.User
 	Token string
 	CSRF  string
+	// Problems is how many stopped outbox entries need attention.
+	Problems int
 }
 
 // New returns the HTTP handler.
@@ -84,6 +92,7 @@ func New(d Deps) (http.Handler, error) {
 	}))
 	mux.HandleFunc("GET /today", s.protected(s.itemsPage("today", "Today", "Nothing to sift yet.")))
 	mux.HandleFunc("GET /backlog", s.protected(s.itemsPage("backlog", "Backlog", "Nothing carried over.")))
+	mux.HandleFunc("GET /read", s.protected(s.readPage))
 	mux.HandleFunc("POST /sync/actions", s.protected(s.syncActions))
 	mux.HandleFunc("GET /settings", s.protected(s.settingsHome))
 	mux.HandleFunc("GET /settings/sources", s.protected(s.sourcesForm))
@@ -95,6 +104,9 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /settings/keys", s.protected(s.keysForm))
 	mux.HandleFunc("POST /settings/keys", s.protected(s.keyCreate))
 	mux.HandleFunc("POST /settings/keys/{id}/revoke", s.protected(s.keyRevoke))
+	mux.HandleFunc("GET /settings/activity", s.protected(s.activityForm))
+	mux.HandleFunc("POST /settings/activity/{id}/retry", s.protected(s.activityRetry))
+	mux.HandleFunc("POST /settings/activity/{id}/dismiss", s.protected(s.activityDismiss))
 	mux.HandleFunc("GET /settings/destinations", s.protected(s.destinationsForm))
 	mux.HandleFunc("POST /settings/destinations/keep", s.protected(s.keepSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))
@@ -134,6 +146,10 @@ func (s *server) protected(h func(http.ResponseWriter, *http.Request, *session))
 			return
 		}
 		sess := &session{User: u, Token: c.Value, CSRF: s.Auth.CSRFToken(c.Value)}
+		// A failed count must never block a page, so an error just hides the alert.
+		if req.Method == http.MethodGet {
+			sess.Problems, _ = s.Outbox.Problems(req.Context(), u.ID)
+		}
 		if req.Method != http.MethodGet && req.Method != http.MethodHead {
 			got := req.Header.Get("X-CSRF-Token")
 			if got == "" {
@@ -199,7 +215,7 @@ func (s *server) ping(w http.ResponseWriter, _ *http.Request, u auth.User) {
 }
 
 func (s *server) page(sess *session, active, title string) ui.Page {
-	return ui.Page{Title: title, Active: active, User: &ui.User{ID: sess.User.ID, Name: sess.User.Username}, CSRF: sess.CSRF}
+	return ui.Page{Title: title, Active: active, User: &ui.User{ID: sess.User.ID, Name: sess.User.Username}, CSRF: sess.CSRF, Problems: sess.Problems}
 }
 
 // badges are the words an actioned card shows. gestures.js has the same table.

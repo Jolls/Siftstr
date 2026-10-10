@@ -3,6 +3,7 @@ package metube
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,5 +59,37 @@ func TestUnreachableMetubeIsAnError(t *testing.T) {
 	defer srv.Close()
 	if err := New(srv.URL, "", nil).Send(context.Background(), dest.Item{ID: "i", URL: "https://example.com/v"}); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestRejectedURLIsAPermanentError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/history" {
+			_, _ = w.Write([]byte(`{"done":[],"queue":[],"pending":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"error","msg":"unsupported URL"}`))
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "", nil).Send(context.Background(), dest.Item{ID: "i", URL: "https://example.com/v"})
+	var p interface{ Permanent() bool }
+	if err == nil || !errors.As(err, &p) || !p.Permanent() {
+		t.Fatalf("want a permanent error, got %v", err)
+	}
+}
+
+func TestFailedDownloadIsAddedAgain(t *testing.T) {
+	added := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/history" {
+			_, _ = w.Write([]byte(`{"done":[{"url":"https://example.com/v","status":"error"}],"queue":[],"pending":[]}`))
+			return
+		}
+		added++
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, "", nil).Send(context.Background(), dest.Item{ID: "i", URL: "https://example.com/v"}); err != nil || added != 1 {
+		t.Fatalf("err=%v added=%d", err, added)
 	}
 }

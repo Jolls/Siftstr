@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -54,7 +55,14 @@ func Permanent(err error) error {
 }
 
 // DefaultClient is used when an adapter is given no HTTP client.
-func DefaultClient() *http.Client { return &http.Client{Timeout: 30 * time.Second} }
+// It does not follow redirects: a POST replayed as a GET would come back 200
+// and be mistaken for success, so a redirect is reported as an error instead.
+func DefaultClient() *http.Client {
+	return &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
 
 // Call sends a request with an optional JSON body and decodes a JSON reply
 // into out (when non-nil and the reply has a body). Any status outside 2xx is
@@ -89,6 +97,9 @@ func Call(ctx context.Context, hc *http.Client, method, url string, header map[s
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 		err := fmt.Errorf("%s %s: status %d", method, redact(url), resp.StatusCode)
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			err = fmt.Errorf("%w (redirect: check that the saved base URL is the final address, e.g. https)", err)
+		}
 		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
 			return resp.StatusCode, Permanent(err)
 		}
@@ -108,10 +119,19 @@ func Call(ctx context.Context, hc *http.Client, method, url string, header map[s
 	return resp.StatusCode, nil
 }
 
-// redact keeps the path and drops any query string from a URL in an error.
+// redact keeps scheme, host and path, and drops any credentials and query
+// string from a URL in an error.
 func redact(u string) string {
-	if i := strings.IndexByte(u, '?'); i >= 0 {
-		return u[:i]
+	p, err := neturl.Parse(u)
+	if err != nil {
+		if i := strings.IndexByte(u, '?'); i >= 0 {
+			u = u[:i]
+		}
+		if i := strings.Index(u, "@"); i >= 0 {
+			u = u[i+1:]
+		}
+		return u
 	}
-	return u
+	p.User, p.RawQuery, p.Fragment = nil, "", ""
+	return p.String()
 }

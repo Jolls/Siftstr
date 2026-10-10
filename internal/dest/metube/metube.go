@@ -5,6 +5,7 @@ package metube
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -49,7 +50,8 @@ func (d *Destination) Send(ctx context.Context, item dest.Item) error {
 	}
 	var h struct {
 		Done []struct {
-			URL string `json:"url"`
+			URL    string `json:"url"`
+			Status string `json:"status"`
 		} `json:"done"`
 		Queue []struct {
 			URL string `json:"url"`
@@ -61,16 +63,37 @@ func (d *Destination) Send(ctx context.Context, item dest.Item) error {
 	if _, err := dest.Call(ctx, d.hc, http.MethodGet, d.base+"/history", d.header(), nil, &h); err != nil {
 		return err
 	}
+	for _, e := range h.Done {
+		// A download that ended in an error is not "already added": adding
+		// the URL again is the retry.
+		if e.URL == item.URL && e.Status != "error" {
+			return nil
+		}
+	}
 	for _, list := range [][]struct {
 		URL string `json:"url"`
-	}{h.Done, h.Queue, h.Pending} {
+	}{h.Queue, h.Pending} {
 		for _, e := range list {
 			if e.URL == item.URL {
 				return nil // already added
 			}
 		}
 	}
-	_, err := dest.Call(ctx, d.hc, http.MethodPost, d.base+"/add", d.header(),
-		map[string]any{"url": item.URL, "quality": "best", "format": "any", "auto_start": true}, nil)
-	return err
+	// MeTube answers 200 with status "error" for a URL it rejects.
+	var reply struct {
+		Status string `json:"status"`
+		Msg    string `json:"msg"`
+	}
+	if _, err := dest.Call(ctx, d.hc, http.MethodPost, d.base+"/add", d.header(),
+		map[string]any{"url": item.URL, "quality": "best", "format": "any", "auto_start": true}, &reply); err != nil {
+		return err
+	}
+	if reply.Status == "error" {
+		msg := reply.Msg
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return dest.Permanent(fmt.Errorf("MeTube rejected the URL: %s", msg))
+	}
+	return nil
 }
