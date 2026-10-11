@@ -29,11 +29,20 @@
         <input type="number" name="excerpt_length" min="50" max="5000" value="{{.Ingest.ExcerptLength}}" required>
       </label>
     </div>
+    <div class="grid">
+      <label>Wait before Claude's summary overwrites Karakeep's (minutes)
+        <input type="number" name="karakeep_summary_delay_minutes" min="0" max="1440" value="{{.Ingest.KarakeepSummaryDelayMinutes}}" required>
+      </label>
+      <label>Give up on Karakeep's summary after (hours)
+        <input type="number" name="karakeep_summary_timeout_hours" min="1" max="168" value="{{.Ingest.KarakeepSummaryTimeoutHours}}" required>
+      </label>
+    </div>
+    <small>Only for sources that use Karakeep summaries, and for items you promote from other sources.</small>
     <button type="submit">Save</button>
   </form>
 </article>
 {{if .Sources}}
-<p>Your Miniflux feeds appear here after the next ingest run. Changes apply to new items and to the next morning run.</p>
+<p>Your feeds appear here after the next ingest run. Bookmarks Karakeep collected itself are one source, called Karakeep. Changes apply to new items and to the next morning run.</p>
 {{range .Sources}}
 <article class="source" id="src-{{.ID}}">
   <form method="post" action="/settings/sources/{{.ID}}">
@@ -46,9 +55,16 @@
       <label>Granularity
         <select name="granularity">
           <option value="individual"{{if eq .Granularity "individual"}} selected{{end}}>Individual items</option>
-          <option value="digest"{{if eq .Granularity "digest"}} selected{{end}}>One digest a day</option>
+          {{if ne .Kind "karakeep"}}<option value="digest"{{if eq .Granularity "digest"}} selected{{end}}>One digest a day</option>{{end}}
         </select>
       </label>
+      {{if eq .Kind "karakeep"}}<input type="hidden" name="summary_source" value="karakeep">
+      {{else}}<label>Summary
+        <select name="summary_source">
+          <option value="agent"{{if ne .SummarySource "karakeep"}} selected{{end}}>Claude, when promoted</option>
+          <option value="karakeep"{{if eq .SummarySource "karakeep"}} selected{{end}}>Karakeep, before triage</option>
+        </select>
+      </label>{{end}}
       <label>Max depth
         <select name="max_depth">
           <option value="deep"{{if eq .MaxDepth "deep"}} selected{{end}}>Deep</option>

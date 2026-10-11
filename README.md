@@ -14,8 +14,8 @@ Siftstr makes no LLM calls itself. The summaries come from a Claude scheduled ta
 
 ```mermaid
 flowchart TD
-    subgraph ingest ["Ingest (timer)"]
-        KR["Karakeep's own RSS import<br/>and bookmarks you save"] --> KQ["Timer: list unarchived bookmarks.<br/>Skip if too old, already in Siftstr,<br/>or tagged sifted"]
+    subgraph ingest ["Ingest (timers)"]
+        KR["Karakeep's own RSS import<br/>and bookmarks you save"] --> KQ["Every 30 minutes: list unarchived bookmarks.<br/>Skip if too old, already in Siftstr,<br/>or tagged sifted"]
         MF[Miniflux entries] --> Q{"Per-source setting:<br/>summary_source"}
         NO[Nostr events] --> Q
     end
@@ -44,11 +44,11 @@ flowchart TD
 - **Triage is on the title and excerpt**, for every feed. Digests are the exception: they have no single title to judge, so a digest card starts as Claude's summary.
 - **Promote brings the card back with a summary.** On `agent` feeds (the default) Claude writes it at the next morning run and it overwrites the bookmark's summary in Karakeep about 30 minutes after the bookmark is created. On `karakeep` feeds (dashed) Karakeep's own summary is shown, with no Claude run.
 - **`agent` feeds** stay out of Karakeep until you promote or keep. Digests must use this path, and so should Nostr, which has no page for Karakeep to crawl.
-- **Bookmarks Karakeep collects itself** are polled on a timer, so Karakeep's own RSS import can feed the same triage. They already have Karakeep's summary, so promote shows it with no Claude run. The `sifted` tag keeps Siftstr from offering back what it already sent.
+- **Bookmarks Karakeep collects itself** are polled every 30 minutes, so Karakeep's own RSS import can feed the same triage. They already have Karakeep's summary, so promote shows it with no Claude run. The `sifted` tag keeps Siftstr from offering back what it already sent.
 - **`karakeep` feeds** are saved to Karakeep at ingest, so use it only on feeds you are happy to have Karakeep crawl.
 - **Claude** writes digest summaries and the summary for promoted items on `agent` feeds. It does nothing else.
 
-The dashed `karakeep` path is designed in [ARCHITECTURE.md](ARCHITECTURE.md) (§5 to §7) but not built yet.
+The dashed `karakeep` path is an experiment (see [ROADMAP.md](ROADMAP.md)): it is built, but has had only a first check against a real Karakeep. The design is in [ARCHITECTURE.md](ARCHITECTURE.md) (§5 to §7). Karakeep's own summary and the sources it collects are read back by a job that runs every 30 minutes, so a promoted card on the `karakeep` path can take that long to return.
 
 ## What you need
 

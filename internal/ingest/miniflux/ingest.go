@@ -15,6 +15,7 @@ import (
 
 	"github.com/Jolls/Siftstr/internal/connections"
 	"github.com/Jolls/Siftstr/internal/ids"
+	"github.com/Jolls/Siftstr/internal/ingest"
 	"github.com/Jolls/Siftstr/internal/sources"
 )
 
@@ -90,6 +91,14 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	}
 	defer tx.Rollback()
 
+	day, err := sources.LocalDay(ctx, tx, userID, now)
+	if err != nil {
+		return res, err
+	}
+	karakeepConn, err := ingest.KarakeepConnection(ctx, tx, userID)
+	if err != nil {
+		return res, err
+	}
 	refs, err := syncSources(ctx, tx, userID, feeds)
 	if err != nil {
 		return res, err
@@ -97,8 +106,8 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	res.Sources = len(refs)
 
 	insert, err := tx.PrepareContext(ctx,
-		`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, published_at, state, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_light', ?, ?)
+		`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, published_at, state, batch_date, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (user_id, source_id, external_id) DO NOTHING`)
 	if err != nil {
 		return res, err
@@ -106,7 +115,7 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	defer insert.Close()
 	for _, e := range entries {
 		ref, ok := refs[strconv.FormatInt(e.FeedID, 10)]
-		if !ok || !ref.enabled {
+		if !ok || !ref.Enabled {
 			continue
 		}
 		if !cutoff.IsZero() && !e.Published.IsZero() && e.Published.Before(cutoff) {
@@ -121,13 +130,20 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 		if !e.Published.IsZero() {
 			published = e.Published.UTC().Format(time.RFC3339)
 		}
-		r, err := insert.ExecContext(ctx, id, userID, ref.id, strconv.FormatInt(e.ID, 10), MediaType(e), e.URL,
-			strings.TrimSpace(e.Title), Excerpt(e.Content, cfg.ExcerptLength), nullIfEmpty(e.Content), published, stamp, stamp)
+		media, title := MediaType(e), strings.TrimSpace(e.Title)
+		state, batch := ref.Start(day)
+		r, err := insert.ExecContext(ctx, id, userID, ref.ID, strconv.FormatInt(e.ID, 10), media, e.URL,
+			title, Excerpt(e.Content, cfg.ExcerptLength), nullIfEmpty(e.Content), published, state, batch, stamp, stamp)
 		if err != nil {
 			return res, fmt.Errorf("insert item: %w", err)
 		}
 		if n, _ := r.RowsAffected(); n > 0 {
 			res.Items++
+			if ref.UsesKarakeep(karakeepConn) {
+				if err := ingest.QueueBookmark(ctx, tx, now, userID, karakeepConn, id, e.URL, title, media); err != nil {
+					return res, fmt.Errorf("queue bookmark: %w", err)
+				}
+			}
 		}
 	}
 	return res, tx.Commit()
@@ -146,27 +162,22 @@ func (g *Ingester) connection(ctx context.Context, userID string) (connections.C
 	return connections.Connection{}, ErrNoConnection
 }
 
-type sourceRef struct {
-	id      string
-	enabled bool
-}
-
 // syncSources upserts one source per feed. Name and category follow
 // Miniflux; the user's per-source settings are never touched.
-func syncSources(ctx context.Context, tx *sql.Tx, userID string, feeds []Feed) (map[string]sourceRef, error) {
-	out := make(map[string]sourceRef, len(feeds))
+func syncSources(ctx context.Context, tx *sql.Tx, userID string, feeds []Feed) (map[string]ingest.Source, error) {
+	out := make(map[string]ingest.Source, len(feeds))
 	for _, f := range feeds {
 		ext := strconv.FormatInt(f.ID, 10)
 		id, err := ids.New("src_")
 		if err != nil {
 			return nil, err
 		}
-		var ref sourceRef
+		var ref ingest.Source
 		err = tx.QueryRowContext(ctx,
 			`INSERT INTO sources (id, user_id, kind, external_id, name, category) VALUES (?, ?, 'miniflux_feed', ?, ?, ?)
 			 ON CONFLICT (user_id, kind, external_id) DO UPDATE SET name = excluded.name, category = excluded.category
-			 RETURNING id, enabled`,
-			id, userID, ext, f.Title, f.Category).Scan(&ref.id, &ref.enabled)
+			 RETURNING id, enabled, granularity, summary_source`,
+			id, userID, ext, f.Title, f.Category).Scan(&ref.ID, &ref.Enabled, &ref.Granularity, &ref.SummarySource)
 		if err != nil {
 			return nil, fmt.Errorf("upsert source: %w", err)
 		}

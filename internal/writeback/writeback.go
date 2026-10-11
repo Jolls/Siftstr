@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/dest"
+	"github.com/Jolls/Siftstr/internal/ingest"
 	"github.com/Jolls/Siftstr/internal/outbox"
+	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/triage"
 )
 
@@ -32,6 +34,15 @@ const (
 const (
 	SettingVideoDestinations   = "video_destinations"
 	SettingPodcastDestinations = "podcast_destinations"
+)
+
+// Settings and defaults for Claude's summary overwrite in Karakeep.
+const (
+	// SettingSummaryDelay is the user_settings key for how many minutes Claude's
+	// promote summary waits after the bookmark is made, so that it lands after
+	// Karakeep's own summarizer has finished and is not replaced by it.
+	SettingSummaryDelay = sources.SettingSummaryDelayMinutes
+	DefaultSummaryDelay = sources.DefaultSummaryDelayMinutes * time.Minute
 )
 
 // Tags added in Karakeep.
@@ -61,6 +72,13 @@ type subject struct {
 	light      string
 	deep       string
 	entryIDs   []int64
+	// karakeepSource is set for a source that takes its summaries from
+	// Karakeep (a feed with summary_source = karakeep, or Karakeep itself).
+	// via adds that the user has a Karakeep connection, which is what makes
+	// the item use that path: without one it behaves as `agent`.
+	karakeepSource bool
+	fromKarakeep   bool // the source is Karakeep itself: the user saved the bookmark
+	via            bool
 }
 
 // OnRelease is the triage.Service.OnRelease hook.
@@ -76,6 +94,7 @@ func (p *Planner) OnRelease(ctx context.Context, tx *sql.Tx, userID string, rel 
 		} else if err != nil {
 			return err
 		}
+		sub.via = sub.karakeepSource && conns[Karakeep] != ""
 		if err := p.plan(ctx, tx, userID, conns, r, sub); err != nil {
 			return fmt.Errorf("action %s: %w", r.ActionID, err)
 		}
@@ -108,30 +127,82 @@ func (p *Planner) plan(ctx context.Context, tx *sql.Tx, userID string, conns map
 	}
 
 	switch r.Outcome {
-	case "kept":
-		item := dest.Item{ID: sub.id, URL: sub.url, Title: sub.title, MediaType: sub.media, Summary: sub.summary(),
-			Tags: []string{TagSifted, TagKept}}
-		if sub.typ == triage.SubjectDigest {
-			item.Note = true // a digest has no URL of its own
-			return send(Karakeep, item)
+	case "archived":
+		// A delete on the first look removes the bookmark Karakeep holds. An
+		// archive after promote leaves it, already archived and tagged.
+		if sub.via && r.Prev != "deep" {
+			return send(Karakeep, dest.Item{ID: sub.id, Verb: dest.VerbDelete})
 		}
-		kinds, err := keepDestinations(ctx, tx, userID, sub.media)
+	case "kept":
+		return p.keep(ctx, tx, userID, sub, send)
+	case "pending_deep":
+		if sub.via {
+			// The bookmark exists and Karakeep summarizes it: tag and archive it,
+			// and leave the summary alone.
+			return send(Karakeep, p.update(sub, true, TagSifted, TagPromoted))
+		}
+		// Nothing in Karakeep yet: the bookmark is made now, and Claude's
+		// summary overwrites Karakeep's own later, once Karakeep has had time
+		// to write it (queueSummary).
+		id, ok := conns[Karakeep]
+		if !ok {
+			return nil
+		}
+		payload, err := json.Marshal(dest.Item{ID: sub.id, URL: sub.url, Title: sub.title, MediaType: sub.media,
+			Archived: true, Tags: []string{TagSifted, TagPromoted}})
 		if err != nil {
 			return err
 		}
-		for _, k := range kinds {
-			it := item
-			if k != Karakeep {
-				it.Tags = nil
-			}
-			if err := send(k, it); err != nil {
-				return err
-			}
+		if _, err := outbox.Enqueue(ctx, tx, p.Now(), outbox.Entry{
+			UserID: userID, ActionID: r.ActionID, ConnectionID: id, Op: Karakeep, Payload: payload,
+		}, "karakeep-promote:"+sub.id); err != nil {
+			return err
 		}
-	case "pending_deep":
-		// Karakeep waits for the deep summary. If it already arrived during
-		// the hold, send now; otherwise OnDeep sends it.
-		return p.deepSave(ctx, tx, userID, conns, sub.id)
+		// If the deep summary already arrived during the hold, queue it now.
+		return p.queueSummary(ctx, tx, userID, conns, sub.id)
+	}
+	return nil
+}
+
+// update is the Karakeep entry that sets the flag and tags of an item's
+// existing bookmark. It carries the URL so that, if the bookmark turns out not
+// to exist yet, the sender can make it in the wanted state instead.
+func (p *Planner) update(sub subject, archived bool, tags ...string) dest.Item {
+	return dest.Item{ID: sub.id, Verb: dest.VerbUpdate, URL: sub.url, Title: sub.title, MediaType: sub.media, Archived: archived, Tags: tags}
+}
+
+func (p *Planner) keep(ctx context.Context, tx *sql.Tx, userID string, sub subject, send func(string, dest.Item) error) error {
+	// A digest has no URL of its own: it is saved as a note with its summary.
+	if sub.typ == triage.SubjectDigest {
+		return send(Karakeep, dest.Item{ID: sub.id, Title: sub.title, MediaType: sub.media, Summary: sub.summary(),
+			Note: true, Tags: []string{TagSifted, TagKept}})
+	}
+	kinds, err := keepDestinations(ctx, tx, userID, sub.media)
+	if err != nil {
+		return err
+	}
+	item := dest.Item{ID: sub.id, URL: sub.url, Title: sub.title, MediaType: sub.media}
+	for _, k := range kinds {
+		it := item
+		switch {
+		case k == Karakeep && sub.via:
+			it = p.update(sub, false, TagSifted, TagKept)
+		case k == Karakeep:
+			it.Tags = []string{TagSifted, TagKept}
+		}
+		if err := send(k, it); err != nil {
+			return err
+		}
+	}
+	if sub.via && !slices.Contains(kinds, Karakeep) {
+		// Karakeep is not a destination for this kind of item, so the bookmark
+		// Siftstr made for its summary goes. One the user saved there stays,
+		// unarchived and tagged: the tag is what keeps it from coming back for
+		// triage.
+		if sub.fromKarakeep {
+			return send(Karakeep, p.update(sub, false, TagSifted, TagKept))
+		}
+		return send(Karakeep, dest.Item{ID: sub.id, Verb: dest.VerbDelete})
 	}
 	return nil
 }
@@ -143,14 +214,18 @@ func (p *Planner) OnDeep(ctx context.Context, tx *sql.Tx, userID, itemID string)
 	if err != nil {
 		return err
 	}
-	return p.deepSave(ctx, tx, userID, conns, itemID)
+	return p.queueSummary(ctx, tx, userID, conns, itemID)
 }
 
-// deepSave queues the archived, tagged Karakeep bookmark for a promoted item,
-// once both halves have happened: the promote's hold has ended and the deep
-// summary exists. Whichever happens second calls this and queues it; the
-// dedupe key keeps it to one.
-func (p *Planner) deepSave(ctx context.Context, tx *sql.Tx, userID string, conns map[string]string, itemID string) error {
+// queueSummary queues the overwrite of a promoted item's Karakeep summary with
+// Claude's, once both halves have happened: the promote's hold has ended (so
+// the bookmark has been queued) and the deep summary exists. Whichever
+// happens second calls this, and the dedupe key keeps it to one.
+//
+// Karakeep's own summarizer replaces a bookmark's summary when its crawl
+// finishes, so ours must not go in first. The entry is not due until
+// karakeep_summary_delay_minutes after the bookmark was queued.
+func (p *Planner) queueSummary(ctx context.Context, tx *sql.Tx, userID string, conns map[string]string, itemID string) error {
 	id, ok := conns[Karakeep]
 	if !ok {
 		return nil
@@ -170,15 +245,54 @@ func (p *Planner) deepSave(ctx context.Context, tx *sql.Tx, userID string, conns
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(dest.Item{ID: sub.id, URL: sub.url, Title: sub.title, MediaType: sub.media,
-		Summary: sub.summary(), Archived: true, Tags: []string{TagSifted, TagPromoted}})
+	if sub.karakeepSource {
+		return nil // Karakeep's own summary stands on this path
+	}
+	delay, err := summaryDelay(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
-	_, err = outbox.Enqueue(ctx, tx, p.Now(), outbox.Entry{
-		UserID: userID, ActionID: actionID, ConnectionID: id, Op: Karakeep, Payload: payload,
-	}, "karakeep-promote:"+itemID)
+	now := p.Now()
+	// The wait runs from when the bookmark was queued. If that time cannot be
+	// found, wait the full delay from now: too long is harmless, while too
+	// short lets Karakeep's own summarizer overwrite ours.
+	due := now.Add(delay)
+	var created string
+	err = tx.QueryRowContext(ctx, `SELECT created_at FROM outbox WHERE user_id = ? AND dedupe_key = ?`,
+		userID, "karakeep-promote:"+itemID).Scan(&created)
+	if err == nil {
+		if t, perr := time.Parse(time.RFC3339, created); perr == nil && t.Add(delay).Before(due) {
+			due = t.Add(delay)
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if due.Before(now) {
+		due = now
+	}
+	payload, err := json.Marshal(dest.Item{ID: sub.id, Verb: dest.VerbSummary, Summary: sub.deep})
+	if err != nil {
+		return err
+	}
+	_, err = outbox.Enqueue(ctx, tx, now, outbox.Entry{
+		UserID: userID, ActionID: actionID, ConnectionID: id, Op: Karakeep, Payload: payload, NotBefore: due,
+	}, "karakeep-summary:"+itemID)
 	return err
+}
+
+// summaryDelay is how long Claude's summary waits after the bookmark is made.
+func summaryDelay(ctx context.Context, tx *sql.Tx, userID string) (time.Duration, error) {
+	var v string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`, userID, SettingSummaryDelay).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DefaultSummaryDelay, nil
+	} else if err != nil {
+		return 0, err
+	}
+	if n, perr := strconv.Atoi(v); perr == nil && n >= 0 {
+		return time.Duration(n) * time.Minute, nil
+	}
+	return DefaultSummaryDelay, nil
 }
 
 func (s subject) summary() string {
@@ -193,15 +307,17 @@ func load(ctx context.Context, tx *sql.Tx, userID, typ, id string) (subject, err
 	switch typ {
 	case triage.SubjectItem:
 		var light, deep sql.NullString
-		var kind, ext string
+		var kind, ext, summarySource, granularity string
 		err := tx.QueryRowContext(ctx,
-			`SELECT i.url, i.title, i.media_type, i.state, i.light_summary, i.deep_summary, s.kind, i.external_id
+			`SELECT i.url, i.title, i.media_type, i.state, i.light_summary, i.deep_summary, s.kind, i.external_id, s.summary_source, s.granularity
 			 FROM items i JOIN sources s ON s.user_id = i.user_id AND s.id = i.source_id
-			 WHERE i.user_id = ? AND i.id = ?`, userID, id).Scan(&sub.url, &sub.title, &sub.media, &sub.state, &light, &deep, &kind, &ext)
+			 WHERE i.user_id = ? AND i.id = ?`, userID, id).Scan(&sub.url, &sub.title, &sub.media, &sub.state, &light, &deep, &kind, &ext, &summarySource, &granularity)
 		if err != nil {
 			return sub, err
 		}
 		sub.light, sub.deep = light.String, deep.String
+		sub.fromKarakeep = kind == "karakeep"
+		sub.karakeepSource = (sub.fromKarakeep || summarySource == ingest.SummaryKarakeep) && granularity == "individual"
 		if n, err := strconv.ParseInt(ext, 10, 64); err == nil && kind == "miniflux_feed" {
 			sub.entryIDs = []int64{n}
 		}

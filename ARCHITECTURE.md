@@ -55,12 +55,12 @@ Siftstr is **not** a reader. Kept items go to tools that handle the actual consu
 |---|---|
 | Blogs, news | RSS, via Miniflux |
 | YouTube channels | Per-channel RSS, via Miniflux (title and link only) |
-| Reddit subreddits/multis | Native `.rss` (top/hot/new, time window), via Miniflux. Self posts include the body text; link posts carry only a title and the outbound URL, so their light summary has little to go on. |
+| Reddit subreddits/multis | Native `.rss` (top/hot/new, time window), via Miniflux. Self posts include the body text; link posts carry only a title and the outbound URL, so their excerpt has little to go on. |
 | Audio podcasts | Podcast RSS, via Miniflux (title and show notes only) |
 | GitHub | Mainly releases (`releases.atom`). Other repo activity (issues, PRs, commits) works the same way through any feed URL. Via Miniflux. |
 | Newsletters | Hidden or proxied RSS, via Miniflux |
 | Nostr | Direct relay queries for followed npubs. This is the only non-Miniflux source. |
-| Karakeep bookmarks | Unarchived bookmarks that Karakeep itself collected (its own RSS import, or anything the user saved there), polled from Karakeep's API. Already carries Karakeep's AI summary. See §6. |
+| Karakeep bookmarks | Unarchived bookmarks that Karakeep itself collected (its own RSS import, or anything the user saved there), polled from Karakeep's API on the Karakeep job (§8). Already carries Karakeep's AI summary. See §6. |
 
 In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped goes through Miniflux. A third, **Karakeep**, is part of the Karakeep experiment (ROADMAP.md).
 
@@ -94,10 +94,10 @@ In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped
 | Accounts | Users, password login, sessions, per-user API keys, per-user upstream connections (secrets encrypted at rest) |
 | Scheduler | In-app timers for ingestion, releasing held actions, and the janitor. Ingestion runs once per user. |
 | Miniflux ingestor | Mirrors feeds and categories into `sources`; pulls unread entries on a timer into the database; dedupes by entry ID |
-| Karakeep ingestor | On the ingest timer, lists the user's unarchived Karakeep bookmarks newest first and creates an item for each one that is not too old, not already in Siftstr, and not one Siftstr created itself (§6). Only runs for users with a Karakeep connection. |
+| Karakeep ingestor | On the Karakeep job, lists the user's unarchived Karakeep bookmarks newest first, 20 to a page, and creates an item for each link that is not too old, not already in Siftstr, and not one Siftstr created itself (§6). Only runs for users with a Karakeep connection. |
 | Nostr ingestor | On the ingest timer, opens a short subscription to each of the user's relays for the followed npubs, reads until the relay signals end of stored events, and closes it. Drops events with a bad ID or signature or from an unfollowed key, skips replies, and dedupes by event ID. Items link to a public viewer (`njump.me`) because events have no URL of their own. |
 | Work dispenser | When Claude asks for work, applies carryover, then builds the work package from whatever is in the database: digest bundles and promoted items waiting for a deep summary, with resolved prompts. Promoted items from `karakeep` sources are not included. |
-| Karakeep summary poller | On a timer, reads the Karakeep bookmark of each `pending_deep` item from a `karakeep` source and stores its summary when one appears (§5, §6) |
+| Karakeep summary poller | In the same job, right after the ingestor: reads the Karakeep bookmark of each `pending_deep` item from a `karakeep` source whose promote can no longer be undone, and stores its summary when one appears (§5, §6) |
 | Briefing builder | Once summaries arrive, assembles the day's briefing (Today + Backlog) and writes the markdown file |
 | Action log and triage service | Stores incoming actions idempotently, runs the item state machine, handles undo by cancelling held effects |
 | Write-back outbox | Holds each action's upstream effects for the grace period, then sends them, with retry |
@@ -138,8 +138,8 @@ There is no service worker or installable app. The page must be loaded while onl
 | (new) | ingest timer, digest source | `pending_light` | Waits until Claude next asks for work. |
 | `pending_light` | digest summary received | `light` | |
 | `pending_deep` | Claude's summary received (`agent` source) | `deep` | |
-| `pending_deep` | poller finds Karakeep's summary (`karakeep` source) | `deep` | Normally already there at promote, so the card returns within a poll interval. |
-| `pending_deep` | `karakeep` source, no summary after `karakeep_summary_timeout_hours` (*proposed*: 2) | `deep` | Shown with its excerpt and no summary, so a failed crawl or Karakeep's AI being off never strands an item. |
+| `pending_deep` | poller finds Karakeep's summary (`karakeep` source) | `deep` | Normally already there at promote, so the card returns at the next Karakeep job (every 30 minutes) after the promote's hold has ended. The card then lands on the user's current day. |
+| `pending_deep` | `karakeep` source, Karakeep reports its summarization failed, its bookmark is gone, or there is no summary after `karakeep_summary_timeout_hours` (default 2) | `deep` | Shown with its excerpt and no summary, so a failed crawl or Karakeep's AI being off never strands an item. A failure is acted on at once; only a summary that is still pending waits out the timeout. |
 | `pending_*` | Claude's summary failed or missing | unchanged | Retried at the next morning run |
 | `light` | delete (swipe left / `Left`) | `archived` | |
 | `light` | promote (swipe right / `Right`) | `pending_deep` | Allowed **once** per item. The summary arrives the next morning (`agent`) or from Karakeep within minutes (`karakeep`). Disabled for sources with `max_depth = light` and for digests. |
@@ -181,11 +181,15 @@ Sources belong to a user. They are mirrored from that user's Miniflux feed list 
 
 The setting requires a connected Karakeep with AI summarization on. Without a connection the source behaves as `agent`. Digest sources can't use `karakeep`, since there is no page to summarize. This path means Karakeep crawls and stores every item from the feeds that use it, including ones that end up archived, so it is meant for feeds the user chooses to try it on. The simpler alternative, for feeds the user doesn't need Siftstr to triage, is to add the feed to Karakeep's own RSS import and leave it out of Siftstr.
 
-**Karakeep as a source.** Karakeep can collect items on its own: its RSS import, a browser extension, a share from a phone. The user sifts those in Siftstr too. On the ingest timer Siftstr lists the user's **unarchived** bookmarks, newest first, and stops at the first one older than `max_age_days` (the same cutoff as Miniflux, measured from the bookmark's creation time), so connecting to a large library cannot flood Today. A bookmark becomes an item only if it passes all of these checks:
+**Karakeep as a source.** Karakeep can collect items on its own: its RSS import, a browser extension, a share from a phone. The user sifts those in Siftstr too. On the Karakeep job (every 30 minutes) Siftstr lists the user's **unarchived** bookmarks, newest first, 20 to a page, and stops at the first one older than `max_age_days` (the same cutoff as Miniflux, measured from the bookmark's creation time), so connecting to a large library cannot flood Today. A bookmark becomes an item only if it passes all of these checks:
 
 - **Not too old.** See above.
-- **Not already known.** No item for this user has the bookmark's ID (`external_id`) or the same normalized URL. The URL check also covers the short window in which a bookmark Siftstr just created for a keep exists but is not tagged yet.
+- **A link.** Text notes and uploaded files have no page to triage and are skipped.
+- **Named by where it came from.** The card, the briefing and `/read` show the bookmark's publisher as Karakeep crawled it, or failing that the site of its link (the host without `www.`), instead of the source name "Karakeep" (`items.byline`). An item ingested before bylines existed gets its byline the next time its bookmark is listed. A byline that is already set is never changed.
+- **Not already known.** No item for this user has the bookmark's ID (`external_id` on a Karakeep source, or `karakeep_id` on any item) or the same normalized URL (scheme and host in lower case, no fragment, no `utm_` or click-id parameters, no trailing slash). The URL check also covers the short window in which a bookmark Siftstr just created for a keep exists but is not tagged yet.
 - **Not one Siftstr wrote.** Anything tagged `sifted` is skipped. This is what breaks the loop with Karakeep as a destination: a kept item is unarchived in Karakeep, so without the tag the next poll would offer it for triage again.
+
+The walk reads 20 a page and stops at the first page with nothing to ingest or name, once an earlier walk has already gone back as far as the current age limit allows (`karakeep_walked_back_to`), so a steady tick reads one page however large the library; raising or removing the age limit makes the next walk go further back.
 
 These items are treated as a `karakeep` source (`summary_source = karakeep`, no setting needed): Karakeep's own AI summary is shown on promote, and Claude is not involved. There is no Miniflux entry, so nothing is sent to Miniflux, as for Nostr. Archive deletes the bookmark, keep tags it `sifted` and `kept` and leaves it unarchived, and promote tags it `sifted` and `promoted` and archives it, the same as for any `karakeep` source. A source row of kind `karakeep` carries the per-source settings, so `carryover` and `max_depth` still apply.
 
@@ -251,6 +255,16 @@ Failures retry with exponential backoff (1 minute, doubling, capped at 6 hours) 
 
 **Summaries written to Karakeep.** Karakeep's auto-summarize replaces whatever summary a link bookmark has when its crawl finishes, so a summary written right after creating the bookmark would be lost. Siftstr writes a summary of its own in two cases. A **digest** is a text note, which Karakeep doesn't auto-summarize, so its summary is written with the note and with no delay. A **promote on an `agent` source** writes Claude's summary in a separate outbox entry that is not due until `karakeep_summary_delay_minutes` (a user setting, *proposed* default 30) after the bookmark was created. That entry **overwrites** the bookmark's summary; it does not merge, and it sets a desired state, so a repeat send changes nothing. A keep never writes a summary, so Karakeep's own stands, and a `karakeep` source never gets one from Siftstr. Karakeep's own AI tagging is left alone and Siftstr only adds its tags. Digests: archive marks the children read; keep saves a text note (the digest summary) to Karakeep and marks the children read. Nostr items and Karakeep-sourced items have no Miniflux entry, so nothing is sent to Miniflux for them (for Nostr, archive is a local-only change). A destination the user has not connected is skipped, and the action is still released.
 
+**What was checked against a real Karakeep (2026-10-11).** These facts shaped the design above. They were read from one instance with AI summarization on, so re-check them after a Karakeep upgrade.
+
+- A bookmark created archived (`archived: true`) is still crawled, summarized and tagged by Karakeep's AI, about 30 to 40 seconds after creation for a short page. Archiving does not keep it out of its pipeline (Q24).
+- Creating a link whose URL already exists returns the existing bookmark (`alreadyExists`) **and sets its archived flag to what the request says, or to unarchived when the request has none.** Every create therefore sends `archived` explicitly.
+- `PATCH /bookmarks/{id}` takes `archived` and `summary` independently; a field left out is untouched. `POST` and `DELETE /bookmarks/{id}/tags` attach and detach tags by name (`{"tags":[{"tagName":"..."}]}`); detaching leaves the tag itself behind. `DELETE /bookmarks/{id}` returns 204.
+- `GET /bookmarks?archived=false` returns the newest first (by `createdAt`), with `limit` and an opaque `nextCursor` (null on the last page). Each bookmark carries `summary`, `summarizationStatus` (`pending`, `success` or `failure`), `taggingStatus` and its tags with who attached them. Karakeep's AI adds its own tags, so the `sifted` check looks at tag names only. A page of 100 was too large to transfer reliably; pages of 20 are used. Never list all tags: the endpoint is huge.
+- A library may hold far more archived than unarchived bookmarks (the one checked had about 17,000 archived and 300 unarchived). The ingestor only lists unarchived ones and stops at the age cutoff, so the archived pile is never read.
+
+**How the outbox copes with the bookmark not existing yet.** An entry that works on an item's bookmark (`update`, `delete`, `summary`) finds the bookmark ID in `items.karakeep_id` when it is *sent*, not when it is queued, because the entry that makes the bookmark may not have gone out yet. A save records the ID it gets back. If there is still none, an `update` makes the bookmark in the wanted state from the item's URL, a `delete` has nothing to do, and a `summary` retries. The bookmark made at ingest is dropped if the item has moved past `light` by the time it is sent, so a late ingest entry can never re-archive what a keep has just unarchived. It is also made only if Karakeep has no bookmark for that URL (`GET /bookmarks/check-url`): one the user already has is theirs, so it is left as it is, not archived, and its ID is not recorded, so a later delete cannot remove it. A promote or keep is the user's own act, so those do take over an existing bookmark for the URL. An entry that has to wait for another (a summary whose bookmark is not made yet) is put back for five minutes without using up its retries. A kept video or podcast whose destinations do not include Karakeep has the bookmark Siftstr made deleted again, unless the bookmark was one the user saved in Karakeep themselves, which stays, unarchived and tagged.
+
 **Which destinations a kept video or podcast goes to** is a per-user multi-select on the destinations page (`user_settings` keys `video_destinations` and `podcast_destinations`, comma-separated kinds). Unset, a video goes to every connected destination that can take one (Karakeep and MeTube) and a podcast to Karakeep. Articles and posts always go to Karakeep.
 
 MeTube is a plain URL downloader with no YouTube account behind it, so it can't do likes, history, or playlists. YouTube account features (Watch Later, likes, history) are not in v1 (see Q8).
@@ -276,9 +290,9 @@ type Destination interface {
 
 ### All day: Siftstr timers (no LLM)
 
-- **Ingest timer** (e.g. every 30 minutes): keeps adding new Miniflux entries, Nostr events and unarchived Karakeep bookmarks to the database as `light`, ready to triage at once (digest entries as `pending_light`, summarized at the next morning run). Nothing triggers ingestion on demand.
+- **Ingest timers** (every 30 minutes, one per ingestor): keep adding new Miniflux entries and Nostr events to the database as `light`, ready to triage at once, on the user's local day they were ingested (digest entries as `pending_light`, summarized at the next morning run). A source set to use Karakeep summaries also gets its archived Karakeep bookmark queued in the outbox at this point. Nothing triggers ingestion on demand.
 - **Release timer** (e.g. every minute): releases actions whose hold has ended and sends their write-backs.
-- **Karakeep summary poll** (e.g. every 2 minutes): for each `pending_deep` item from a `karakeep` source, reads the bookmark's summary and moves the item to `deep` when it appears, or when the timeout passes (§5). It runs per user, with that user's Karakeep connection, and is skipped for users with none.
+- **Karakeep job** (every 30 minutes, per user, skipped for users with no Karakeep connection): first lists unarchived Karakeep bookmarks and offers new ones as `light` items (§6), then, for each `pending_deep` item from a `karakeep` source, reads the bookmark's summary and moves the item to `deep` when it appears, or when Karakeep reports failure or the timeout passes (§5). One job rather than two timers, because a 30-minute wait for a promoted card is acceptable (the summary is normally there already) and it keeps one pass over one connection. An item whose promote is still in its undo hold is skipped, so an undo is never refused because the summary happened to arrive.
 - **Janitor** (daily, per user; also once at startup): deletes the user's workflow rows older than 6 months, by `created_at`: items (including ones never triaged, see Q16), actions (`received_at`), outbox entries, runs with their `run_items` (`started_at`), digests with no remaining items (`batch_date`, since they have no `created_at`), and expired sessions. It never touches sources, connections or settings, and a second run the same day deletes nothing. Because the source entry stays unread upstream, a deleted item can be ingested again if it is still inside the source's `max_age_days` window.
 - **Backup** (daily, instance-wide; also once at startup): `VACUUM INTO` writes `/data/backups/siftstr-YYYY-MM-DD.db` (UTC day) through a temp file and a rename, skips the day if the file exists, and keeps the newest 7 (Q22).
 
@@ -305,8 +319,8 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 - It is rewritten with final outcomes (deleted / archived / promoted / kept / carried over) at the next morning run, before the new day's file starts. The finished file is the durable log of that day.
 - It is generated from the same data and template as `/read`, so the file matches what the user saw.
 - It lives at `/data/briefings/<username>/YYYY-MM-DD.md` (the day is the user's local date), written atomically so a sync client never sees half a file. A failed write is logged and never fails the run or the summary submission.
-- Layout: YAML frontmatter (`date`, `today`, `backlog`, `final`), then `## Today` and `## Backlog`, one `###` entry per item or digest (linked title, source and media type, outcome, summary). The summaries are Claude's markdown, inserted as is.
-- Outcomes: deleted, archived, kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
+- Layout: YAML frontmatter (`date`, `today`, `backlog`, `final`), then `## Today` and `## Backlog`, one `###` entry per item or digest (linked title, source and media type, outcome, then the summary, or the excerpt as a quote when there is no summary yet). A digest always has a summary; a promoted item gets its summary at the next rewrite, not live (Q25). The summaries are Claude's or Karakeep's markdown, inserted as is.
+- Outcomes: deleted, archived (deleted after a promote), kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
 - Closing: `POST /api/v1/runs` runs carryover and then rewrites every earlier summarized day not yet closed with `final: true`. The last closed day is remembered in `user_settings` (`briefing_finalized_day`); the file is never read back.
 - `/read` renders the same Today and Backlog from the same query: headings and `<article>` only, with no buttons, forms or badges in the text flow.
 
@@ -323,7 +337,7 @@ The scheduled-task prompt should stay thin and stable. All variable instructions
   "instructions": { "global": "...", "deep": "...", "digest": "..." },
   "items": [
     {
-      "id": "itm_123", "stage": "light", "media_type": "article",
+      "id": "itm_123", "stage": "deep", "media_type": "article",
       "source": { "id": "src_9", "name": "Some Blog", "prompt_override": null },
       "title": "...", "url": "https://...", "excerpt": "...", "content": null
     }
@@ -337,7 +351,7 @@ The scheduled-task prompt should stay thin and stable. All variable instructions
 }
 
 // POST /api/v1/runs/{run_id}/summaries
-{ "summaries": [ { "id": "itm_123", "stage": "light", "summary_md": "..." } ] }
+{ "summaries": [ { "id": "itm_123", "stage": "deep", "summary_md": "..." } ] }
 ```
 
 The default summarization prompt ships with the app and can be edited globally and per source in Settings, in the style of a CLAUDE.md file.
@@ -373,7 +387,9 @@ sources        id, user_id, kind[miniflux_feed|nostr|karakeep], external_id, nam
 items          id, user_id, source_id, external_id, media_type, url, title,
                excerpt, content, published_at, state, light_summary, deep_summary, promoted_at,
                batch_date, digest_id, karakeep_id (bookmark id, set at ingest on the
-               karakeep path), created_at, updated_at
+               karakeep path), byline (where it came from, when more specific
+               than the source: a Karakeep bookmark's publisher or site),
+               created_at, updated_at
                UNIQUE(user_id, source_id, external_id)
 
 digests        id, user_id, source_id, batch_date, summary, state
@@ -555,12 +571,12 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 20. ~~**Multiple devices.**~~ **Decided (2026-10-09):** last-write-wins by client timestamp. A later action replaces an earlier one unless the earlier action's effects were already released to the outbox, in which case it is rejected with the item's current state.
 21. ~~**StartOS package location.**~~ **Decided:** a separate repo. This repo stays platform-neutral.
 22. ~~**Backup snapshot.**~~ **Decided (2026-10-09):** the janitor timer takes a `VACUUM INTO` snapshot once a day into `/data/backups/siftstr-YYYY-MM-DD.db` and keeps the newest 7. The snapshot is instance-wide (the whole database), not per user.
-23. **Karakeep summary timing.** *Proposed, to test:* wait 30 minutes after creating a bookmark before Claude's promote summary overwrites it (`karakeep_summary_delay_minutes`), and give up waiting for Karakeep's summary on a promoted `karakeep` item after 2 hours (`karakeep_summary_timeout_hours`). Both are guesses; tune them against a real Karakeep with real crawl times.
-24. **Karakeep-path bookmarks start archived.** *Proposed:* so untriaged items stay out of the user's main Karakeep list; keep unarchives, promote leaves it archived (and tags it), delete removes it. Check against how Karakeep treats archived bookmarks for search and AI (an archived bookmark must still be crawled and summarized).
-25. **Briefing contents.** Individual items have no summary until promoted, so the briefing and `/read` list titles and excerpts, plus summaries for digests and for promoted items that have one. *Proposed:* promoted items appear with their summary at the next rewrite (the closing pass), not live.
-26. **Which day an item belongs to.** Items now arrive and are triageable all day, rather than as one batch at the morning run. *Proposed:* an item's `batch_date` is the user's local date when it was ingested, and carryover at the morning run moves earlier days' untriaged items to Backlog or expires them as before.
+23. **Karakeep summary timing.** *Implemented as proposed, still to tune:* wait 30 minutes after creating a bookmark before Claude's promote summary overwrites it (`karakeep_summary_delay_minutes`), and give up waiting for Karakeep's summary on a promoted `karakeep` item after 2 hours (`karakeep_summary_timeout_hours`). Both are user settings on the Sources page. A first check (2026-10-11) saw a short page summarized within about 30 seconds, so both are generous; leave them until there are real crawl times for slow pages, and note that Karakeep re-summarizes if a bookmark is re-crawled. The poll that reads the summary back runs on the 30-minute Karakeep job rather than its own 2-minute timer (decided 2026-10-11): waiting is cheap and a failure is detected from `summarizationStatus` without waiting for the timeout.
+24. ~~**Karakeep-path bookmarks start archived.**~~ **Verified and decided (2026-10-11):** untriaged items stay out of the user's main Karakeep list; keep unarchives, promote leaves it archived (and tags it), delete removes it. Checked against a real Karakeep: an archived bookmark is still crawled, summarized and tagged (§7). One consequence is built in: a create always sends the archived flag, since re-saving an existing URL would otherwise unarchive it.
+25. ~~**Briefing contents.**~~ **Decided (2026-10-11):** the briefing and `/read` list titles and excerpts, plus summaries for digests and for promoted items that have one. A promoted item appears with its summary at the next rewrite (the closing pass), not live.
+26. ~~**Which day an item belongs to.**~~ **Decided (2026-10-11):** an item's `batch_date` is the user's local date when it was ingested, and carryover at the morning run moves earlier days' untriaged items to Backlog or expires them as before. A promoted item whose summary arrives (Claude's, or Karakeep's) is moved to the user's current day, so it comes back in Today. Items that were waiting for a light summary under the old flow were released to `light` by migration 7, on the day they were ingested.
 27. ~~**What delete does to a bookmark Siftstr did not create.**~~ **Decided (2026-10-11):** bookmarks the user saved by hand go through triage like any other, and Delete removes them too. There is no list or tag scoping. The swipe is labelled Delete, so it is clear what it does.
-28. **Internal names.** The outcome is called Delete in the UI and docs, but the stored action kind (`archive`), the item state (`archived`), the sync API and the CSS still use the old name for both swipe-left outcomes (delete on the first look, archive on the second; the write-back depends on the item's state when the action arrives), and the state values already exist in shipped databases. *Proposed:* keep the identifiers until there is a reason to migrate, and rename the label, buttons and badge only. Revisit if the mismatch confuses contributors, since a rename needs an append-only migration and a sync API change.
+28. **Internal names.** *Label rename done (2026-10-11), identifiers unchanged as proposed.* The outcome is called Delete in the UI and docs, but the stored action kind (`archive`), the item state (`archived`), the sync API and the CSS still use the old name for both swipe-left outcomes (delete on the first look, archive on the second; the write-back depends on the item's state when the action arrives), and the state values already exist in shipped databases. *Proposed:* keep the identifiers until there is a reason to migrate, and rename the label, buttons and badge only. Revisit if the mismatch confuses contributors, since a rename needs an append-only migration and a sync API change.
 
 ---
 

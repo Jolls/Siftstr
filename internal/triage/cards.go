@@ -21,8 +21,10 @@ type Card struct {
 	URL        string
 	Source     string
 	MediaType  string
+	Excerpt    string // what a card is triaged on until it has a summary
 	Summary    string
 	State      string
+	Promoted   bool // the item has been promoted (and not undone), so an archive is a real Karakeep archive
 	CanPromote bool
 	// UndoID is the held action that put the card in its state, or empty when
 	// nothing can be undone any more.
@@ -52,8 +54,8 @@ func (s *Service) Cards(ctx context.Context, userID, list, today string) ([]Card
 		return alias + `.batch_date < ? AND (` + alias + `.state IN ('light', 'deep') OR held != '')`
 	}
 
-	itemQ := fmt.Sprintf(`SELECT i.id, i.title, i.url, s.name, i.media_type, i.state,
-		COALESCE(NULLIF(i.deep_summary, ''), i.light_summary, ''), i.promoted_at IS NOT NULL, s.max_depth,
+	itemQ := fmt.Sprintf(`SELECT i.id, i.title, i.url, COALESCE(NULLIF(i.byline, ''), s.name), i.media_type, i.state,
+		i.excerpt, COALESCE(NULLIF(i.deep_summary, ''), i.light_summary, ''), i.promoted_at IS NOT NULL, s.max_depth,
 		COALESCE(`+heldAction+`, '') AS held
 		FROM items i JOIN sources s ON s.user_id = i.user_id AND s.id = i.source_id
 		WHERE i.user_id = ? AND i.digest_id IS NULL AND `+where("i")+`
@@ -65,15 +67,14 @@ func (s *Service) Cards(ctx context.Context, userID, list, today string) ([]Card
 	var cards []Card
 	for rows.Next() {
 		c := Card{Kind: SubjectItem}
-		var promoted bool
 		var maxDepth string
-		if err := rows.Scan(&c.ID, &c.Title, &c.URL, &c.Source, &c.MediaType, &c.State, &c.Summary, &promoted, &maxDepth, &c.UndoID); err != nil {
+		if err := rows.Scan(&c.ID, &c.Title, &c.URL, &c.Source, &c.MediaType, &c.State, &c.Excerpt, &c.Summary, &c.Promoted, &maxDepth, &c.UndoID); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		// Promote asks for a deeper summary once, and only where the source
 		// supports one. On a deep card it acts as keep.
-		c.CanPromote = c.State == "deep" || (!promoted && maxDepth == "deep")
+		c.CanPromote = c.State == "deep" || (!c.Promoted && maxDepth == "deep")
 		cards = append(cards, c)
 	}
 	if err := rows.Close(); err != nil {

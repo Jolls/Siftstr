@@ -2,10 +2,72 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"io/fs"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 	"time"
 )
+
+// Rebuilding sources for migration 7 must not cascade into the rows that
+// reference it, and the new column and kind must work afterwards.
+func TestSourcesRebuildKeepsItems(t *testing.T) {
+	ctx := context.Background()
+	old := fstest.MapFS{}
+	entries, _ := fs.ReadDir(migrationsFS, "migrations")
+	for _, e := range entries {
+		if e.Name() >= "007" {
+			continue
+		}
+		b, _ := fs.ReadFile(migrationsFS, "migrations/"+e.Name())
+		old["migrations/"+e.Name()] = &fstest.MapFile{Data: b}
+	}
+	path := filepath.Join(t.TempDir(), "t.db")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?_pragma=foreign_keys(1)&_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{db: db}
+	defer s.Close()
+	if err := s.migrate(ctx, old, "migrations"); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO users (id, username, password_hash, created_at) VALUES ('u1', 'u1', 'x', 'now')`,
+		`INSERT INTO sources (id, user_id, kind, external_id, name) VALUES ('s1', 'u1', 'miniflux_feed', '1', 'Feed')`,
+		`INSERT INTO sources (id, user_id, kind, external_id, name, granularity) VALUES ('s2', 'u1', 'miniflux_feed', '2', 'Digest', 'digest')`,
+		`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, state, created_at, updated_at)
+		   VALUES ('i1', 'u1', 's1', 'e1', 'article', 'https://example.com', 't', 'pending_light', '2026-10-01T08:00:00Z', 'now')`,
+		`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, state, created_at, updated_at)
+		   VALUES ('i2', 'u1', 's2', 'e2', 'article', 'https://example.com/2', 't', 'pending_light', '2026-10-01T08:00:00Z', 'now')`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.migrate(ctx, migrationsFS, "migrations"); err != nil {
+		t.Fatal(err)
+	}
+
+	var state, day string
+	if err := db.QueryRowContext(ctx, `SELECT state, COALESCE(batch_date, '') FROM items WHERE id = 'i1'`).Scan(&state, &day); err != nil {
+		t.Fatalf("item lost in the rebuild: %v", err)
+	}
+	if state != "light" || day != "2026-09-30" {
+		t.Errorf("individual item = %s on %q, want light on 2026-09-30, the Backlog", state, day)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT state FROM items WHERE id = 'i2'`).Scan(&state); err != nil || state != "pending_light" {
+		t.Errorf("digest entry = %q, %v, want it still waiting for its digest", state, err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO sources (id, user_id, kind, external_id, name, summary_source) VALUES ('s3', 'u1', 'karakeep', 'karakeep', 'Karakeep', 'karakeep')`); err != nil {
+		t.Errorf("karakeep source: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, state, created_at, updated_at)
+		VALUES ('i3', 'u1', 'nope', 'e3', 'article', 'u', 't', 'light', 'n', 'n')`); err == nil {
+		t.Error("foreign keys are not enforced after the migration")
+	}
+}
 
 func open(t *testing.T) *Store {
 	t.Helper()
@@ -37,7 +99,7 @@ func TestOpenAppliesMigrationsOnceAndUsesWAL(t *testing.T) {
 	}
 	defer s.Close()
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 6 {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 8 {
 		t.Fatalf("migrations = %d, %v", n, err)
 	}
 }

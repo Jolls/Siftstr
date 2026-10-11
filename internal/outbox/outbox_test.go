@@ -177,3 +177,61 @@ func TestSameSecondEntriesKeepInsertionOrder(t *testing.T) {
 		}
 	}
 }
+
+// An entry with a not-before time is not sent until then, and keeps its
+// place once it is due.
+func TestEntryWaitsForItsNotBeforeTime(t *testing.T) {
+	f := newFixture(t)
+	ok, err := Enqueue(context.Background(), f.st.DB(), f.now, Entry{UserID: "u1", Op: "karakeep", Payload: []byte(`{}`), NotBefore: f.now.Add(30 * time.Minute)}, "later")
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.enqueue(t, "u1", "now")
+	if _, err := f.db.Run(context.Background(), "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.got) != 1 || f.got[0].Key != "now" {
+		t.Fatalf("sent %v before the entry was due", f.got)
+	}
+	f.now = f.now.Add(29 * time.Minute)
+	_, _ = f.db.Run(context.Background(), "u1")
+	if len(f.got) != 1 {
+		t.Fatal("sent one minute early")
+	}
+	f.now = f.now.Add(2 * time.Minute)
+	_, _ = f.db.Run(context.Background(), "u1")
+	if len(f.got) != 2 || f.got[1].Key != "later" {
+		t.Fatalf("sent %v", f.got)
+	}
+}
+
+type deferErr struct{}
+
+func (deferErr) Error() string        { return "not yet" }
+func (deferErr) Defer() time.Duration { return 5 * time.Minute }
+
+// An entry that has to wait for something else is put back for later without
+// using up its retries, so waiting cannot turn into a failure.
+func TestDeferredEntryKeepsItsAttempts(t *testing.T) {
+	f := newFixture(t)
+	f.enqueue(t, "u1", "k")
+	f.err = deferErr{}
+	for i := 0; i < 8; i++ { // far more than MaxAttempts (3)
+		if _, err := f.db.Run(context.Background(), "u1"); err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(6 * time.Minute)
+	}
+	status, attempts, lastErr := f.row(t, "u1")
+	if status != "pending" || attempts != 0 || lastErr == "" {
+		t.Fatalf("status %s, attempts %d, last error %q", status, attempts, lastErr)
+	}
+	if len(f.got) != 8 {
+		t.Fatalf("tried %d times", len(f.got))
+	}
+	f.err = nil
+	_, _ = f.db.Run(context.Background(), "u1")
+	if status, _, _ = f.row(t, "u1"); status != "done" {
+		t.Fatalf("status %s once the wait was over", status)
+	}
+}

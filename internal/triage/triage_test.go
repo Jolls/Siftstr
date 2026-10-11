@@ -578,3 +578,43 @@ func TestReleaseNowSkipsTheHoldForOneUser(t *testing.T) {
 		t.Fatalf("u2's action is %s", status)
 	}
 }
+
+// A card is triaged on its excerpt, which it keeps showing next to any
+// summary it later gets, and knows whether it was promoted before it was
+// archived (the stored state is the same for both swipe-left outcomes).
+func TestCardsCarryTheExcerptAndWhetherPromoted(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "plain", "u1", "src1", "light", "")
+	f.item(t, "promoted", "u1", "src1", "deep", "")
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-09', excerpt = 'the excerpt'`)
+	f.exec(t, `UPDATE items SET promoted_at = '2026-10-09T07:00:00Z', deep_summary = 'deep text' WHERE id = 'promoted'`)
+
+	cards := f.cardIDs(t, "u1", ListToday)
+	if c := cards["plain"]; c.Excerpt != "the excerpt" || c.Summary != "" || c.Promoted {
+		t.Errorf("plain = %+v, want an excerpt, no summary, not promoted", c)
+	}
+	if c := cards["promoted"]; c.Excerpt != "the excerpt" || c.Summary != "deep text" || !c.Promoted {
+		t.Errorf("promoted = %+v", c)
+	}
+	// Acting does not change what was promoted, so the badge can tell the two
+	// swipe-left outcomes apart after the fact.
+	f.apply(t, "u1", act("a1", "plain", Archive, f.at(0)), act("a2", "promoted", Archive, f.at(0)))
+	cards = f.cardIDs(t, "u1", ListToday)
+	if cards["plain"].Promoted || !cards["promoted"].Promoted || cards["plain"].State != "archived" || cards["promoted"].State != "archived" {
+		t.Errorf("after archive: plain %+v, promoted %+v", cards["plain"], cards["promoted"])
+	}
+}
+
+// A card shows the item's own byline when it has one (a Karakeep bookmark
+// names the site it came from), and its source's name otherwise.
+func TestCardSourceIsTheBylineWhenThereIsOne(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "plain", "u1", "src1", "light", "")
+	f.item(t, "named", "u1", "src1", "light", "")
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-09'`)
+	f.exec(t, `UPDATE items SET byline = 'Armstrong Economics' WHERE id = 'named'`)
+	cards := f.cardIDs(t, "u1", ListToday)
+	if cards["plain"].Source != "Blog" || cards["named"].Source != "Armstrong Economics" {
+		t.Fatalf("sources: %q, %q", cards["plain"].Source, cards["named"].Source)
+	}
+}

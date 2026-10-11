@@ -57,7 +57,7 @@ func newFixture(t *testing.T) *fixture {
 	f.tr = &triage.Service{DB: st.DB(), Now: clock, OnRelease: pl.OnRelease}
 	f.runs = &runs.Service{DB: st.DB(), Now: clock, OnDeep: pl.OnDeep}
 
-	snd := &Sender{Conns: conns, Factories: map[string]dest.Factory{}}
+	snd := &Sender{DB: st.DB(), Conns: conns, Factories: map[string]dest.Factory{}}
 	for _, k := range []string{Miniflux, Karakeep, MeTube} {
 		k := k
 		snd.Factories[k] = func(baseURL, secret string, _ json.RawMessage) dest.Destination {
@@ -71,7 +71,10 @@ func newFixture(t *testing.T) *fixture {
 		('src1','u1','miniflux_feed','1','Blog','individual','deep'),
 		('src3','u1','miniflux_feed','3','News','digest','light'),
 		('srcn','u1','nostr','n','Nostr','individual','deep'),
+		('srck','u1','miniflux_feed','4','Summarized by Karakeep','individual','deep'),
+		('srckk','u1','karakeep','karakeep','Karakeep','individual','deep'),
 		('src9','u2','miniflux_feed','1','Other','individual','deep')`)
+	f.exec(`UPDATE sources SET summary_source = 'karakeep' WHERE id IN ('srck', 'srckk')`)
 	f.exec(`INSERT INTO digests (id, user_id, source_id, batch_date, summary, state) VALUES ('dig1','u1','src3','2026-10-09','digest text','light')`)
 	return f
 }
@@ -80,9 +83,18 @@ type fakeDest struct {
 	f    *fixture
 	kind string
 	base string
+	id   string
 }
 
 func (d *fakeDest) Name() string { return d.kind }
+
+// BookmarkID is what a real Karakeep would report after a save.
+func (d *fakeDest) BookmarkID() string {
+	if d.kind != Karakeep {
+		return ""
+	}
+	return d.id
+}
 func (d *fakeDest) Send(_ context.Context, it dest.Item) error {
 	if err := d.f.fail[d.kind]; err != nil {
 		return err
@@ -90,6 +102,10 @@ func (d *fakeDest) Send(_ context.Context, it dest.Item) error {
 	user := "u1"
 	if d.base == "https://u2.example.com" {
 		user = "u2"
+	}
+	d.id = ""
+	if it.Verb == dest.VerbSave || it.Verb == dest.VerbCreate {
+		d.id = "bm_" + it.ID
 	}
 	d.f.calls = append(d.f.calls, sent{d.kind, user, it})
 	return nil
@@ -215,7 +231,7 @@ func TestReplayingTheOutboxIsHarmless(t *testing.T) {
 	}
 }
 
-func TestKeepArticleGoesToKarakeepUnarchivedWithSummary(t *testing.T) {
+func TestKeepArticleGoesToKarakeepUnarchivedWithoutASummary(t *testing.T) {
 	f := newFixture(t)
 	f.connect("u1", Miniflux, Karakeep, MeTube)
 	f.item("i1", "src1", "article", "light", "41")
@@ -224,7 +240,7 @@ func TestKeepArticleGoesToKarakeepUnarchivedWithSummary(t *testing.T) {
 	f.drain()
 	eq(t, f.kinds(), []string{"karakeep", "miniflux"})
 	k := f.call("karakeep")
-	if k.Archived || k.Summary != "light text" || !slices.Equal(k.Tags, []string{"sifted", "kept"}) || k.URL != "https://example.com/i1" {
+	if k.Archived || k.Summary != "" || k.Verb != dest.VerbSave || !slices.Equal(k.Tags, []string{"sifted", "kept"}) || k.URL != "https://example.com/i1" {
 		t.Fatalf("%+v", k)
 	}
 }
@@ -266,79 +282,6 @@ func TestKeepPodcastDefaultsToKarakeepAndCanAddMore(t *testing.T) {
 	f.release()
 	f.drain()
 	eq(t, f.kinds(), []string{"karakeep", "metube"})
-}
-
-func TestPromoteMarksReadNowAndWaitsForTheDeepSummary(t *testing.T) {
-	f := newFixture(t)
-	f.connect("u1", Miniflux, Karakeep)
-	f.item("i1", "src1", "article", "light", "41")
-	f.act("promote", "i1")
-	f.release()
-	f.drain()
-	eq(t, f.kinds(), []string{"miniflux"}) // Q10: read at promote; Karakeep waits
-
-	// The morning run delivers the deep summary.
-	f.exec(`INSERT INTO runs (id, user_id, started_at, day) VALUES ('run1','u1','n','2026-10-10')`)
-	f.exec(`INSERT INTO run_items (run_id, user_id, subject_id) VALUES ('run1','u1','i1')`)
-	res, err := f.runs.Submit(context.Background(), "u1", "run1", []runs.Summary{{ID: "i1", Stage: "deep", MD: "deep text"}})
-	if err != nil || res.Accepted != 1 {
-		t.Fatalf("%+v %v", res, err)
-	}
-	f.drain()
-	eq(t, f.kinds(), []string{"karakeep", "miniflux"})
-	k := f.call("karakeep")
-	if !k.Archived || k.Summary != "deep text" || !slices.Equal(k.Tags, []string{"sifted", "promoted"}) {
-		t.Fatalf("%+v", k)
-	}
-
-	// Submitting the same batch again, or draining again, sends nothing more.
-	_, _ = f.runs.Submit(context.Background(), "u1", "run1", []runs.Summary{{ID: "i1", Stage: "deep", MD: "deep text"}})
-	f.drain()
-	if len(f.calls) != 2 || f.outboxCount() != 2 {
-		t.Fatalf("%d calls, %d rows", len(f.calls), f.outboxCount())
-	}
-}
-
-func TestDeepSummaryArrivingDuringTheHoldIsSavedAtRelease(t *testing.T) {
-	f := newFixture(t)
-	f.connect("u1", Karakeep)
-	f.item("i1", "src1", "article", "light", "41")
-	f.act("promote", "i1")
-	f.exec(`INSERT INTO runs (id, user_id, started_at, day) VALUES ('run1','u1','n','2026-10-10')`)
-	f.exec(`INSERT INTO run_items (run_id, user_id, subject_id) VALUES ('run1','u1','i1')`)
-	if _, err := f.runs.Submit(context.Background(), "u1", "run1", []runs.Summary{{ID: "i1", Stage: "deep", MD: "deep text"}}); err != nil {
-		t.Fatal(err)
-	}
-	if f.outboxCount() != 0 {
-		t.Fatal("saved while the promote was still undoable")
-	}
-	f.release()
-	f.drain()
-	eq(t, f.kinds(), []string{"karakeep"})
-	if f.call("karakeep").Summary != "deep text" {
-		t.Fatalf("%+v", f.call("karakeep"))
-	}
-}
-
-func TestKeepAfterPromoteUnarchivesInKarakeep(t *testing.T) {
-	f := newFixture(t)
-	f.connect("u1", Karakeep)
-	f.item("i1", "src1", "article", "light", "41")
-	f.act("promote", "i1")
-	f.release()
-	f.exec(`INSERT INTO runs (id, user_id, started_at, day) VALUES ('run1','u1','n','2026-10-10')`)
-	f.exec(`INSERT INTO run_items (run_id, user_id, subject_id) VALUES ('run1','u1','i1')`)
-	_, _ = f.runs.Submit(context.Background(), "u1", "run1", []runs.Summary{{ID: "i1", Stage: "deep", MD: "deep text"}})
-	f.drain()
-	f.calls = nil
-	f.now = f.now.Add(time.Hour)
-	f.act("keep", "i1")
-	f.release()
-	f.drain()
-	k := f.call("karakeep")
-	if k.Archived || k.Summary != "deep text" {
-		t.Fatalf("%+v", k)
-	}
 }
 
 func TestUndoWithinTheHoldQueuesNothing(t *testing.T) {

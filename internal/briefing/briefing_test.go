@@ -61,6 +61,8 @@ func TestBuildSplitsTodayAndBacklog(t *testing.T) {
 	f.item(t, "b", "u1", "s1", "archived", "2026-10-09", "sum b")
 	f.item(t, "c", "u1", "s1", "pending_deep", "2026-10-09", "sum c")
 	f.item(t, "d", "u1", "s1", "kept", "2026-10-09", "sum d")
+	f.item(t, "p", "u1", "s1", "archived", "2026-10-09", "sum p") // promoted, then archived
+	f.exec(t, `UPDATE items SET promoted_at = '2026-10-09T07:00:00Z' WHERE id = 'p'`)
 	f.item(t, "old", "u1", "s1", "light", "2026-10-08", "old sum")
 	f.item(t, "olddone", "u1", "s1", "archived", "2026-10-08", "x") // not waiting: not in backlog
 	f.item(t, "wait", "u1", "s1", "pending_light", "", "")          // not summarized yet
@@ -73,13 +75,13 @@ func TestBuildSplitsTodayAndBacklog(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(titles(b.Today), ",")
-	for _, want := range []string{"Title a=", "Title b=archived", "Title c=promoted", "Title d=kept", "News digest="} {
+	for _, want := range []string{"Title a=", "Title b=deleted", "Title c=promoted", "Title d=kept", "Title p=archived", "News digest="} {
 		if !strings.Contains(got, want) {
 			t.Errorf("today %q is missing %q", got, want)
 		}
 	}
-	if len(b.Today) != 5 {
-		t.Errorf("today has %d entries (%s), want 5; digest children and unsummarized items must not appear", len(b.Today), got)
+	if len(b.Today) != 6 {
+		t.Errorf("today has %d entries (%s), want 6; digest children and unsummarized items must not appear", len(b.Today), got)
 	}
 	if len(b.Backlog) != 1 || b.Backlog[0].Title != "Title old" || b.Backlog[0].Outcome != "" {
 		t.Errorf("backlog = %v", titles(b.Backlog))
@@ -168,7 +170,7 @@ func TestWriteAndFinalize(t *testing.T) {
 		t.Fatalf("live file: %v %q", err, body)
 	}
 
-	f.exec(t, `UPDATE items SET state = 'archived' WHERE id = 'a'`)
+	f.exec(t, `UPDATE items SET state = 'archived', promoted_at = 'x' WHERE id = 'a'`)
 	if err := f.s.Finalize(ctx, "u1", "2026-10-09"); err != nil {
 		t.Fatal(err)
 	}
@@ -254,5 +256,43 @@ func TestBacklogKeepsPromotedWaitingForDeepSummary(t *testing.T) {
 	}
 	if len(b.Backlog) != 1 || b.Backlog[0].Outcome != "promoted" {
 		t.Errorf("backlog = %v", titles(b.Backlog))
+	}
+}
+
+// An item is listed with the excerpt it was triaged on until it has a summary.
+func TestEntriesShowTheExcerptUntilThereIsASummary(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "plain", "u1", "s1", "light", "2026-10-09", "")
+	f.item(t, "promoted", "u1", "s1", "deep", "2026-10-09", "")
+	f.exec(t, `UPDATE items SET excerpt = 'the excerpt'`)
+	f.exec(t, `UPDATE items SET deep_summary = 'deep text' WHERE id = 'promoted'`)
+	b, err := f.s.Build(context.Background(), "u1", "2026-10-09", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := b.Markdown()
+	if !strings.Contains(md, "> the excerpt") || !strings.Contains(md, "deep text") {
+		t.Fatalf("markdown: %s", md)
+	}
+	if strings.Count(md, "the excerpt") != 1 {
+		t.Errorf("the excerpt should give way to a summary: %s", md)
+	}
+}
+
+func TestEntriesNameTheBylineWhenThereIsOne(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "a", "u1", "s1", "light", "2026-10-09", "")
+	f.item(t, "b", "u1", "s1", "light", "2026-10-09", "")
+	f.exec(t, `UPDATE items SET byline = 'Armstrong Economics' WHERE id = 'b'`)
+	b, err := f.s.Build(context.Background(), "u1", "2026-10-09", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, e := range b.Today {
+		got[e.Title] = e.Source
+	}
+	if got["Title a"] != "Blog" || got["Title b"] != "Armstrong Economics" {
+		t.Fatalf("sources = %v", got)
 	}
 }

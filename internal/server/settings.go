@@ -63,12 +63,13 @@ func (s *server) renderSources(w http.ResponseWriter, req *http.Request, sess *s
 	for _, g := range runs.ZoneGroups(p.Timezone) {
 		p.ZoneGroups = append(p.ZoneGroups, ui.ZoneGroup{Region: g.Region, Zones: g.Zones})
 	}
-	p.Ingest = ui.IngestForm{ExcerptLength: ing.ExcerptLength, MaxAgeDays: ing.MaxAgeDays}
+	p.Ingest = ui.IngestForm{ExcerptLength: ing.ExcerptLength, MaxAgeDays: ing.MaxAgeDays,
+		KarakeepSummaryDelayMinutes: ing.KarakeepSummaryDelayMinutes, KarakeepSummaryTimeoutHours: ing.KarakeepSummaryTimeoutHours}
 	for _, x := range list {
 		p.Sources = append(p.Sources, ui.SourceRow{
 			ID: x.ID, Name: x.Name, Category: x.Category, Kind: x.Kind,
 			Granularity: x.Granularity, MaxDepth: x.MaxDepth, Carryover: x.Carryover,
-			PromptOverride: x.PromptOverride, Enabled: x.Enabled,
+			PromptOverride: x.PromptOverride, Enabled: x.Enabled, SummarySource: x.SummarySource,
 		})
 	}
 	s.ui.Render(w, status, "settings_sources", p)
@@ -81,6 +82,7 @@ func (s *server) sourcesSave(w http.ResponseWriter, req *http.Request, sess *ses
 		Carryover:      req.PostFormValue("carryover"),
 		PromptOverride: req.PostFormValue("prompt_override"),
 		Enabled:        req.PostFormValue("enabled") != "",
+		SummarySource:  req.PostFormValue("summary_source"),
 	}
 	if err := in.Validate(); err != nil {
 		s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
@@ -105,6 +107,24 @@ func (s *server) ingestSave(w http.ResponseWriter, req *http.Request, sess *sess
 		return
 	}
 	in := sources.IngestSettings{ExcerptLength: excerpt, MaxAgeDays: maxAge}
+	// The two Karakeep summary settings are optional in the form: a missing one
+	// keeps what is saved.
+	cur, err := s.Sources.Ingest(req.Context(), sess.User.ID)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	in.KarakeepSummaryDelayMinutes, in.KarakeepSummaryTimeoutHours = cur.KarakeepSummaryDelayMinutes, cur.KarakeepSummaryTimeoutHours
+	for name, dst := range map[string]*int{"karakeep_summary_delay_minutes": &in.KarakeepSummaryDelayMinutes, "karakeep_summary_timeout_hours": &in.KarakeepSummaryTimeoutHours} {
+		if v := strings.TrimSpace(req.PostFormValue(name)); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				s.renderSources(w, req, sess, http.StatusUnprocessableEntity, "All values must be whole numbers.")
+				return
+			}
+			*dst = n
+		}
+	}
 	if err := in.Validate(); err != nil {
 		s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
 		return
@@ -243,7 +263,7 @@ func (s *server) destinationDelete(w http.ResponseWriter, req *http.Request, ses
 
 var promptFields = []ui.PromptField{
 	{Name: runs.PromptGlobal, Label: "Global instructions", Help: "Tone and rules that apply to every summary.", Default: runs.Defaults.Global},
-	{Name: runs.PromptLight, Label: "Light summary", Help: "Used for each new item, from its title and excerpt.", Default: runs.Defaults.Light},
+	{Name: runs.PromptLight, Label: "Light summary", Help: "No longer used: items are triaged on their title and excerpt. Kept so saved instructions and the API stay compatible.", Default: runs.Defaults.Light},
 	{Name: runs.PromptDeep, Label: "Deep summary", Help: "Used the morning after you promote an item.", Default: runs.Defaults.Deep},
 	{Name: runs.PromptDigest, Label: "Digest", Help: "Used for sources set to one digest a day.", Default: runs.Defaults.Digest},
 }

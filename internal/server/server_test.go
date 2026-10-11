@@ -312,3 +312,20 @@ func TestAPIAndSessionAuthAreSeparate(t *testing.T) {
 		t.Errorf("API key on HTML route = %d", resp.StatusCode)
 	}
 }
+
+// Both swipe-left outcomes are stored as archived; the badge tells them apart
+// by whether the item had been promoted. web/static/gestures.js has the same rule.
+func TestBadgeWords(t *testing.T) {
+	for _, c := range []struct {
+		state    string
+		promoted bool
+		want     string
+	}{
+		{"archived", false, "deleted"}, {"archived", true, "archived"}, {"kept", false, "kept"}, {"kept", true, "kept"},
+		{"pending_deep", true, "promoted"}, {"light", false, ""}, {"deep", true, ""}, {"expired", false, ""},
+	} {
+		if got := badge(c.state, c.promoted); got != c.want {
+			t.Errorf("badge(%q, %v) = %q, want %q", c.state, c.promoted, got, c.want)
+		}
+	}
+}
