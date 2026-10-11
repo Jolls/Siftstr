@@ -2,7 +2,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { next, swipe, undoTarget, reconcile, KEYS } = require("../static/gestures.js");
+const { badge, next, swipe, undoTarget, reconcile, KEYS } = require("../static/gestures.js");
 
 test("archive and keep apply to light and deep cards", () => {
   for (const s of ["light", "deep"]) {
@@ -79,4 +79,12 @@ test("undo goes to the focused card if it can be undone, else the latest actione
   a.undo = false;
   assert.equal(undoTarget(c, [a, b], can), null);
   assert.equal(undoTarget(null, [], can), null);
+});
+
+test("both swipe-left outcomes are stored as archived; the badge tells them apart", () => {
+  assert.equal(badge("archived", false), "deleted");
+  assert.equal(badge("archived", true), "archived");
+  assert.equal(badge("kept", false), "kept");
+  assert.equal(badge("pending_deep", false), "promoted");
+  for (const s of ["light", "deep", "expired", "pending_light"]) assert.equal(badge(s, true), "");
 });

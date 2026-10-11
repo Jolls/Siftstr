@@ -222,3 +222,54 @@ func TestKeepDestinationsSaveAndIsolation(t *testing.T) {
 		t.Fatal("saved without csrf")
 	}
 }
+
+func TestSummarySourceAndKarakeepSettingsSave(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	uid := e.userID(t, "alice")
+	e.exec(t, `INSERT INTO sources (id, user_id, kind, external_id, name) VALUES ('s_a', ?, 'miniflux_feed', '1', 'Alice Feed')`, uid)
+	e.exec(t, `INSERT INTO sources (id, user_id, kind, external_id, name) VALUES ('s_k', ?, 'karakeep', 'karakeep', 'Karakeep')`, uid)
+
+	save := url.Values{"csrf": {csrf}, "granularity": {"individual"}, "max_depth": {"deep"}, "carryover": {"carry"}, "enabled": {"1"}, "summary_source": {"karakeep"}}
+	if resp := e.post(t, c, "/settings/sources/s_a", save); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	var ss string
+	_ = e.st.DB().QueryRow(`SELECT summary_source FROM sources WHERE id = 's_a'`).Scan(&ss)
+	if ss != "karakeep" {
+		t.Fatalf("summary_source = %q", ss)
+	}
+	save.Set("granularity", "digest")
+	if resp := e.post(t, c, "/settings/sources/s_a", save); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("a digest on Karakeep summaries = %d, want 422", resp.StatusCode)
+	}
+	_, body := e.get(t, c, "/settings/sources")
+	if !strings.Contains(body, `name="summary_source"`) || !strings.Contains(body, `value="karakeep" selected`) {
+		t.Fatal("the summary source choice is not on the page")
+	}
+	if strings.Count(body, `<option value="digest"`) != 1 {
+		t.Fatal("the Karakeep source must not offer a digest")
+	}
+
+	// The two Karakeep summary settings: optional in the form, validated when given.
+	v := url.Values{"csrf": {csrf}, "max_age_days": {"30"}, "excerpt_length": {"300"}, "karakeep_summary_delay_minutes": {"5"}, "karakeep_summary_timeout_hours": {"8"}}
+	if resp := e.post(t, c, "/settings/ingest", v); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	_, body = e.get(t, c, "/settings/sources")
+	if !strings.Contains(body, `name="karakeep_summary_delay_minutes" min="0" max="1440" value="5"`) || !strings.Contains(body, `value="8"`) {
+		t.Fatal("saved Karakeep summary settings not shown")
+	}
+	v = url.Values{"csrf": {csrf}, "max_age_days": {"31"}, "excerpt_length": {"300"}}
+	if resp := e.post(t, c, "/settings/ingest", v); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save without the optional fields = %d", resp.StatusCode)
+	}
+	_, body = e.get(t, c, "/settings/sources")
+	if !strings.Contains(body, `max="1440" value="5"`) {
+		t.Fatal("leaving the optional fields out must keep what was saved")
+	}
+	v.Set("karakeep_summary_timeout_hours", "0")
+	if resp := e.post(t, c, "/settings/ingest", v); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("bad timeout = %d", resp.StatusCode)
+	}
+}

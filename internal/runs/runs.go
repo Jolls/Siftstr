@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/ids"
+	"github.com/Jolls/Siftstr/internal/ingest"
+	"github.com/Jolls/Siftstr/internal/sources"
 )
 
-// MaxItemsPerRun caps the individual light items in one work package, newest
-// first. The rest stay pending and go out in a later run.
+// MaxItemsPerRun caps the promoted items in one work package, newest first.
+// The rest stay pending and go out in a later run.
 const MaxItemsPerRun = 200
 
 // MaxDigestEntries caps the entries bundled into one digest, newest first.
@@ -74,11 +76,11 @@ func (s *Service) day(ctx context.Context, tx *sql.Tx, userID string) (string, s
 	if err := tx.QueryRowContext(ctx, `SELECT timezone FROM users WHERE id = ?`, userID).Scan(&name); err != nil {
 		return "", "", err
 	}
-	loc, err := time.LoadLocation(name)
-	if err != nil {
-		name, loc = "UTC", time.UTC
+	if _, err := time.LoadLocation(name); err != nil {
+		name = "UTC"
 	}
-	return s.Now().In(loc).Format("2006-01-02"), name, nil
+	day, err := sources.LocalDay(ctx, tx, userID, s.Now())
+	return day, name, err
 }
 
 // Today returns the user's local date (YYYY-MM-DD) for now, which is the day
@@ -313,13 +315,16 @@ func (s *Service) bundleDigests(ctx context.Context, tx *sql.Tx, userID, today s
 	return nil
 }
 
+// pendingItems returns the promoted items waiting for Claude's summary.
+// Individual items are triaged on their excerpt and need none until they are
+// promoted, and a promoted item from a source that uses Karakeep summaries
+// gets Karakeep's instead, so neither is offered.
 func (s *Service) pendingItems(ctx context.Context, tx *sql.Tx, userID string) ([]Item, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT i.id, i.state, i.media_type, s.id, s.name, s.prompt_override, i.title, i.url, i.excerpt, i.content, i.light_summary
 		 FROM items i JOIN sources s ON s.user_id = i.user_id AND s.id = i.source_id
-		 WHERE i.user_id = ? AND s.enabled = 1
-		   AND ((i.state = 'pending_light' AND i.digest_id IS NULL AND s.granularity = 'individual') OR i.state = 'pending_deep')
-		 ORDER BY (i.state = 'pending_deep') DESC, COALESCE(i.published_at, i.created_at) DESC, i.id
+		 WHERE i.user_id = ? AND s.enabled = 1 AND i.state = 'pending_deep' AND NOT (`+ingest.ViaKarakeep+`)
+		 ORDER BY COALESCE(i.published_at, i.created_at) DESC, i.id
 		 LIMIT ?`, userID, MaxItemsPerRun)
 	if err != nil {
 		return nil, err
@@ -335,12 +340,7 @@ func (s *Service) pendingItems(ctx context.Context, tx *sql.Tx, userID string) (
 			&it.Title, &it.URL, &it.Excerpt, &it.Content, &it.LightSummary); err != nil {
 			return nil, err
 		}
-		it.Stage = "light"
-		if state == "pending_deep" {
-			it.Stage = "deep"
-		} else {
-			it.LightSummary, it.Content = nil, nil // a light summary uses the excerpt only
-		}
+		it.Stage = "deep"
 		items = append(items, it)
 	}
 	return items, rows.Err()

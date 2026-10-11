@@ -1,13 +1,17 @@
 {
-  "accepted": 3,
+  "accepted": 2,
   "skipped": [
+    {
+      "id": "itm_a",
+      "reason": "not part of this run"
+    },
     {
       "id": "itm_x",
       "reason": "not part of this run"
     },
     {
       "id": "itm_a",
-      "reason": "not waiting for a deep summary"
+      "reason": "not part of this run"
     },
     {
       "id": "itm_nope",

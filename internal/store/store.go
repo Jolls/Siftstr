@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -104,14 +105,42 @@ func (s *Store) migrate(ctx context.Context, fsys fs.FS, dir string) error {
 	return nil
 }
 
+// foreignKeysOff is the first line of a migration that has to rebuild a table.
+// SQLite only lets a table be dropped and replaced safely with foreign keys
+// off (otherwise the drop cascades into the tables that reference it), and the
+// pragma has no effect inside a transaction, so the runner switches it on a
+// dedicated connection and checks the keys before it commits.
+const foreignKeysOff = "-- siftstr:foreign-keys-off"
+
 func (s *Store) apply(ctx context.Context, version int, name, body string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("begin migration %s: %w", name, err)
+	}
+	defer conn.Close()
+	rebuild := strings.HasPrefix(body, foreignKeysOff)
+	if rebuild {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+		defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`) }()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration %s: %w", name, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, body); err != nil {
 		return fmt.Errorf("apply migration %s: %w", name, err)
+	}
+	if rebuild {
+		var table string
+		err := tx.QueryRowContext(ctx, `SELECT "table" FROM pragma_foreign_key_check LIMIT 1`).Scan(&table)
+		if err == nil {
+			return fmt.Errorf("migration %s: foreign key violation in %s", name, table)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("migration %s: check foreign keys: %w", name, err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 		version, name, time.Now().UTC().Format(time.RFC3339)); err != nil {

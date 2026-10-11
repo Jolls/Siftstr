@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jolls/Siftstr/internal/connections"
 	"github.com/Jolls/Siftstr/internal/ids"
+	"github.com/Jolls/Siftstr/internal/ingest"
 	"github.com/Jolls/Siftstr/internal/sources"
 )
 
@@ -167,7 +168,15 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 		}
 	}
 
-	refs := make(map[string]sourceRef, len(cfg.Npubs))
+	day, err := sources.LocalDay(ctx, tx, userID, now)
+	if err != nil {
+		return res, err
+	}
+	karakeepConn, err := ingest.KarakeepConnection(ctx, tx, userID)
+	if err != nil {
+		return res, err
+	}
+	refs := make(map[string]ingest.Source, len(cfg.Npubs))
 	for _, pk := range cfg.Npubs {
 		ref, err := upsertSource(ctx, tx, userID, pk, names[pk])
 		if err != nil {
@@ -178,8 +187,8 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	res.Sources = len(refs)
 
 	insert, err := tx.PrepareContext(ctx,
-		`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, published_at, state, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_light', ?, ?)
+		`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, excerpt, content, published_at, state, batch_date, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (user_id, source_id, external_id) DO NOTHING`)
 	if err != nil {
 		return res, err
@@ -187,7 +196,7 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	defer insert.Close()
 	for _, e := range posts {
 		ref := refs[e.PubKey]
-		if !ref.enabled || strings.TrimSpace(e.Content) == "" {
+		if !ref.Enabled || strings.TrimSpace(e.Content) == "" {
 			continue
 		}
 		if e.Kind == KindNote && e.IsReply() {
@@ -206,13 +215,20 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 		if e.Kind == KindArticle {
 			media = "article"
 		}
-		r, err := insert.ExecContext(ctx, id, userID, ref.id, e.ID, media, viewerBase+Note(e.ID),
-			title(e), truncate(e.Content, ing.ExcerptLength), e.Content, published.Format(time.RFC3339), stamp, stamp)
+		url, heading := viewerBase+Note(e.ID), title(e)
+		state, batch := ref.Start(day)
+		r, err := insert.ExecContext(ctx, id, userID, ref.ID, e.ID, media, url,
+			heading, truncate(e.Content, ing.ExcerptLength), e.Content, published.Format(time.RFC3339), state, batch, stamp, stamp)
 		if err != nil {
 			return res, fmt.Errorf("insert item: %w", err)
 		}
 		if n, _ := r.RowsAffected(); n > 0 {
 			res.Items++
+			if ref.UsesKarakeep(karakeepConn) {
+				if err := ingest.QueueBookmark(ctx, tx, now, userID, karakeepConn, id, url, heading, media); err != nil {
+					return res, fmt.Errorf("queue bookmark: %w", err)
+				}
+			}
 		}
 	}
 	return res, tx.Commit()
@@ -231,32 +247,27 @@ func (g *Ingester) connection(ctx context.Context, userID string) (connections.C
 	return connections.Connection{}, ErrNoConnection
 }
 
-type sourceRef struct {
-	id      string
-	enabled bool
-}
-
 // upsertSource creates the source for one npub. Its name is the profile name
 // when one was seen, else the shortened npub; a name seen earlier is kept.
 // The user's per-source settings are never touched.
-func upsertSource(ctx context.Context, tx *sql.Tx, userID, pubkey, profile string) (sourceRef, error) {
+func upsertSource(ctx context.Context, tx *sql.Tx, userID, pubkey, profile string) (ingest.Source, error) {
 	id, err := ids.New("src_")
 	if err != nil {
-		return sourceRef{}, err
+		return ingest.Source{}, err
 	}
 	name := profile
 	if name == "" {
 		name = shortNpub(pubkey)
 	}
-	var ref sourceRef
+	var ref ingest.Source
 	err = tx.QueryRowContext(ctx,
 		`INSERT INTO sources (id, user_id, kind, external_id, name, category) VALUES (?, ?, 'nostr', ?, ?, ?)
 		 ON CONFLICT (user_id, kind, external_id) DO UPDATE SET category = excluded.category,
 		   name = CASE WHEN ? != '' THEN excluded.name ELSE sources.name END
-		 RETURNING id, enabled`,
-		id, userID, pubkey, name, Category, profile).Scan(&ref.id, &ref.enabled)
+		 RETURNING id, enabled, granularity, summary_source`,
+		id, userID, pubkey, name, Category, profile).Scan(&ref.ID, &ref.Enabled, &ref.Granularity, &ref.SummarySource)
 	if err != nil {
-		return sourceRef{}, fmt.Errorf("upsert source: %w", err)
+		return ingest.Source{}, fmt.Errorf("upsert source: %w", err)
 	}
 	return ref, nil
 }

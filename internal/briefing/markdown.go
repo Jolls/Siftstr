@@ -11,7 +11,7 @@ func (b Briefing) Markdown() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "---\ndate: %s\ntoday: %d\nbacklog: %d\nfinal: %t\n---\n\n", b.Day, len(b.Today), len(b.Backlog), b.Final)
 	fmt.Fprintf(&sb, "# Siftstr briefing %s\n", b.Day)
-	section(&sb, "Today", b.Today, "Nothing was summarized today.")
+	section(&sb, "Today", b.Today, "Nothing arrived today.")
 	section(&sb, "Backlog", b.Backlog, "Nothing carried over.")
 	return sb.String()
 }
@@ -40,6 +40,8 @@ func section(sb *strings.Builder, name string, entries []Entry, empty string) {
 		fmt.Fprintf(sb, "\n\n%s\n", meta)
 		if s := strings.TrimSpace(e.Summary); s != "" {
 			fmt.Fprintf(sb, "\n%s\n", s)
+		} else if x := strings.TrimSpace(e.Excerpt); x != "" {
+			fmt.Fprintf(sb, "\n> %s\n", oneLine(x))
 		}
 	}
 }

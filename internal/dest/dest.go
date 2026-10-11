@@ -28,6 +28,35 @@ type Item struct {
 	Archived  bool     `json:"archived,omitempty"` // the desired archived flag
 	Tags      []string `json:"tags,omitempty"`
 	EntryIDs  []int64  `json:"entry_ids,omitempty"` // Miniflux entries
+
+	// Verb says what to do with the bookmark. The default creates or finds it
+	// by URL and sets its archived flag and tags; the others work on a
+	// bookmark that already exists.
+	Verb string `json:"verb,omitempty"`
+	// BookmarkID is the Karakeep bookmark for the verbs that need one. It is
+	// filled in when the entry is sent, from what Siftstr has recorded for the
+	// item, since the bookmark may have been created after the entry was queued.
+	BookmarkID string `json:"bookmark_id,omitempty"`
+}
+
+// Karakeep verbs for Item.Verb.
+const (
+	VerbSave    = ""        // create or find by URL; set archived and tags (an action of the user, so it may take over an existing bookmark)
+	VerbCreate  = "create"  // make the bookmark only if Karakeep has none for the URL; an existing one belongs to the user and is left alone
+	VerbUpdate  = "update"  // set archived and tags on the item's bookmark
+	VerbDelete  = "delete"  // delete the item's bookmark
+	VerbSummary = "summary" // overwrite the item's bookmark summary
+)
+
+// NeedsBookmark reports whether the verb works on an existing bookmark.
+func (i Item) NeedsBookmark() bool {
+	return i.Verb == VerbUpdate || i.Verb == VerbDelete || i.Verb == VerbSummary
+}
+
+// BookmarkReporter is implemented by a destination that learns the bookmark ID
+// of what it just sent, so the sender can record it for the item.
+type BookmarkReporter interface {
+	BookmarkID() string
 }
 
 // Destination sends an item to one upstream. Send must be idempotent: the

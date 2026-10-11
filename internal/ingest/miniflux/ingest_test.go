@@ -91,8 +91,14 @@ func TestRunMirrorsSourcesAndPullsItemsOnce(t *testing.T) {
 	if err := st.DB().QueryRow(`SELECT title, excerpt, state, media_type FROM items WHERE external_id = '10'`).Scan(&title, &excerpt, &state, &mt); err != nil {
 		t.Fatal(err)
 	}
-	if title != "Hello" || excerpt != "Hi there" || state != "pending_light" || mt != "article" {
+	if title != "Hello" || excerpt != "Hi there" || state != "light" || mt != "article" {
 		t.Fatalf("item = %q %q %q %q", title, excerpt, state, mt)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM items WHERE external_id = '10' AND batch_date = '2026-01-02'`); got != 1 {
+		t.Fatal("a new individual item should be ready to triage on the ingest day")
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM outbox`); got != 0 {
+		t.Fatalf("a source on the default summary source queued %d Karakeep entries", got)
 	}
 	if got := count(t, st, `SELECT COUNT(*) FROM items WHERE external_id = '11' AND media_type = 'video'`); got != 1 {
 		t.Fatal("video not derived")
@@ -289,5 +295,116 @@ func TestMaxAgeSkipsOldEntriesAndStoresPublishedDate(t *testing.T) {
 	}
 	if res, err = g.Run(ctx, "u1"); err != nil || res.Items != 1 || res.TooOld != 0 {
 		t.Fatalf("no limit: %+v, %v", res, err)
+	}
+}
+
+// The ingest day is the user's local day, not the server's.
+func TestNewItemsLandOnTheUsersLocalDay(t *testing.T) {
+	g, f, st := setup(t)
+	connect(t, g, "u1", "t")
+	if _, err := st.DB().Exec(`UPDATE users SET timezone = 'Pacific/Auckland' WHERE id = 'u1'`); err != nil {
+		t.Fatal(err)
+	}
+	f.feeds = []Feed{{ID: 1, Title: "Blog"}}
+	f.entries = []Entry{{ID: 1, FeedID: 1, Title: "t", URL: "https://x.example"}}
+	if _, err := g.Run(context.Background(), "u1"); err != nil { // 2026-01-02 03:04 UTC is 16:04 that day in Auckland
+		t.Fatal(err)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM items WHERE batch_date = '2026-01-02'`); got != 1 {
+		t.Fatal("wrong local day")
+	}
+	if _, err := st.DB().Exec(`UPDATE users SET timezone = 'America/Los_Angeles' WHERE id = 'u1'`); err != nil {
+		t.Fatal(err)
+	}
+	f.entries = append(f.entries, Entry{ID: 2, FeedID: 1, Title: "u", URL: "https://y.example"})
+	if _, err := g.Run(context.Background(), "u1"); err != nil { // and 2026-01-01 19:04 in Los Angeles
+		t.Fatal(err)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM items WHERE external_id = '2' AND batch_date = '2026-01-01'`); got != 1 {
+		t.Fatal("wrong local day for the second user timezone")
+	}
+}
+
+// A digest source's entries wait for the digest's summary.
+func TestDigestEntriesStillWaitForTheirDigest(t *testing.T) {
+	g, f, st := setup(t)
+	connect(t, g, "u1", "t")
+	f.feeds = []Feed{{ID: 1, Title: "News"}}
+	if _, err := g.Run(context.Background(), "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sources SET granularity = 'digest'`); err != nil {
+		t.Fatal(err)
+	}
+	f.entries = []Entry{{ID: 1, FeedID: 1, Title: "t", URL: "https://x.example"}}
+	if _, err := g.Run(context.Background(), "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM items WHERE state = 'pending_light' AND batch_date IS NULL`); got != 1 {
+		t.Fatal("digest entry should be pending_light with no day yet")
+	}
+}
+
+func connectKarakeep(t *testing.T, g *Ingester, user string) {
+	t.Helper()
+	tok := "kk"
+	if _, err := g.Conns.Create(context.Background(), user, connections.Input{Kind: "karakeep", BaseURL: "https://kk.example.com", Secret: &tok}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A source set to use Karakeep summaries has its items bookmarked, archived,
+// through the outbox, with no action and no hold. Without a connection, or on
+// the default source, nothing is queued.
+func TestKarakeepSummarySourceQueuesAnArchivedBookmark(t *testing.T) {
+	ctx := context.Background()
+	g, f, st := setup(t)
+	connect(t, g, "u1", "t")
+	connect(t, g, "u2", "t2")
+	f.feeds = []Feed{{ID: 1, Title: "Blog"}, {ID: 2, Title: "Other"}}
+	if _, err := g.Run(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sources SET summary_source = 'karakeep' WHERE external_id = '1'`); err != nil {
+		t.Fatal(err)
+	}
+	f.entries = []Entry{
+		{ID: 10, FeedID: 1, Title: "uses karakeep", URL: "https://blog.example/a"},
+		{ID: 11, FeedID: 2, Title: "does not", URL: "https://other.example/b"},
+	}
+	if _, err := g.Run(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM outbox`); got != 0 {
+		t.Fatalf("queued %d entries with no Karakeep connection, want the source to behave as agent", got)
+	}
+
+	connectKarakeep(t, g, "u1")
+	f.entries = append(f.entries, Entry{ID: 12, FeedID: 1, Title: "second", URL: "https://blog.example/c"},
+		Entry{ID: 13, FeedID: 2, Title: "default source", URL: "https://other.example/d"})
+	if _, err := g.Run(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	var op, payload, action string
+	var n int
+	if err := st.DB().QueryRow(`SELECT COUNT(*), MIN(op), MIN(payload), COALESCE(MIN(action_id), '') FROM outbox WHERE user_id = 'u1'`).Scan(&n, &op, &payload, &action); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || op != "karakeep" || action != "" {
+		t.Fatalf("outbox = %d entries, op %q, action %q; want one karakeep entry with no action", n, op, action)
+	}
+	for _, want := range []string{`"url":"https://blog.example/c"`, `"archived":true`, `"verb":"create"`} {
+		if !strings.Contains(payload, want) {
+			t.Errorf("payload %s lacks %s", payload, want)
+		}
+	}
+	if _, err := g.Run(ctx, "u1"); err != nil { // an ingest rerun must not queue it twice
+		t.Fatal(err)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM outbox`); got != 1 {
+		t.Fatalf("rerun left %d entries", got)
+	}
+	if got := count(t, st, `SELECT COUNT(*) FROM outbox WHERE user_id = 'u2'`); got != 0 {
+		t.Fatal("another user's outbox changed")
 	}
 }

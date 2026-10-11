@@ -6,7 +6,7 @@
 */}}
 <section aria-labelledby="read-today">
   <h2 id="read-today">Today</h2>
-  {{range .Today}}{{template "readentry" .}}{{else}}<p>Nothing was summarized today.</p>{{end}}
+  {{range .Today}}{{template "readentry" .}}{{else}}<p>Nothing arrived today.</p>{{end}}
 </section>
 <section aria-labelledby="read-backlog">
   <h2 id="read-backlog">Backlog</h2>
@@ -18,6 +18,6 @@
 <article class="read-entry">
   <h3>{{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h3>
   <p>{{.Source}}{{if .MediaType}}, {{.MediaType}}{{end}}{{if .Outcome}}, {{.Outcome}}{{end}}</p>
-  {{if .Summary}}<p class="summary">{{.Summary}}</p>{{end}}
+  {{if .Summary}}<p class="summary">{{.Summary}}</p>{{else if .Excerpt}}<p class="excerpt">{{.Excerpt}}</p>{{end}}
 </article>
 {{end}}

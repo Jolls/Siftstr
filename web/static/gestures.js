@@ -1,6 +1,6 @@
 // Triage gestures, keys and buttons (ARCHITECTURE.md sections 5, 7 and 11).
 //
-// Swipe left or Left archives, swipe right or Right promotes, tap or Space
+// Swipe left or Left deletes (archives, on a promoted card), swipe right or Right promotes, tap or Space
 // keeps. Every route ends in the same call, act(), which updates the badge
 // at once and puts the action in the page queue (queue.js). Nothing here
 // makes a request or waits on the network, and a card is never removed.
@@ -14,7 +14,15 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  var BADGES = { archived: "archived", kept: "kept", pending_deep: "promoted" }; // same words as server.go
+  // badge is the word an actioned card shows, the same as server.go. Both
+  // swipe-left outcomes are stored as "archived" (ARCHITECTURE.md Q28): it
+  // reads "archived" on a card that was promoted first and "deleted" otherwise.
+  function badge(state, promoted) {
+    if (state === "archived") return promoted ? "archived" : "deleted";
+    if (state === "kept") return "kept";
+    if (state === "pending_deep") return "promoted";
+    return "";
+  }
   var SWIPE_MIN = 60; // px
   var TAP_MAX_MOVE = 10; // px
   var TAP_MAX_MS = 400;
@@ -65,6 +73,7 @@
       canPromote: el.dataset.canPromote === "true",
       undoID: el.dataset.undoAction || "",
       prev: el.dataset.prevState || "",
+      promoted: el.dataset.promoted === "true" || el.dataset.prevState === "deep",
     };
   }
 
@@ -93,10 +102,10 @@
 
     function render(el) {
       var c = readCard(el);
-      var badge = el.querySelector("[data-badge]");
-      var text = BADGES[c.state] || "";
-      badge.textContent = text;
-      badge.hidden = text === "";
+      var badgeEl = el.querySelector("[data-badge]");
+      var text = badge(c.state, c.promoted);
+      badgeEl.textContent = text;
+      badgeEl.hidden = text === "";
       var undo = el.querySelector('[data-action="undo"]');
       if (undo) undo.hidden = c.undoID === "";
       var promote = el.querySelector('[data-action="promote"]');
@@ -202,5 +211,5 @@
     cards().forEach(render);
   }
 
-  return { next: next, swipe: swipe, undoTarget: undoTarget, reconcile: reconcile, init: init, KEYS: KEYS };
+  return { badge: badge, next: next, swipe: swipe, undoTarget: undoTarget, reconcile: reconcile, init: init, KEYS: KEYS };
 });

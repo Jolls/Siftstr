@@ -32,17 +32,16 @@ Returns `201` with the work package. Calling it again before summaries arrive is
   "day": "2026-10-09",            // the user's local date for this run
   "timezone": "Europe/Berlin",    // the user's setting; all stored times are UTC
   "instructions": {               // user prompts, or the shipped defaults
-    "global": "...", "light": "...", "deep": "...", "digest": "..."
+    "global": "...", "light": "...", "deep": "...", "digest": "..."   // "light" is no longer used for items: they are triaged on their excerpt
   },
   "items": [
     {
       "id": "itm_123",
-      "stage": "light",           // "light" | "deep"
+      "stage": "deep",            // always "deep": only items the user promoted are sent
       "media_type": "article",    // article | video | podcast | post
       "source": { "id": "src_9", "name": "Some Blog", "prompt_override": null },
       "title": "...", "url": "https://...", "excerpt": "...",
-      "content": null             // light: always null. deep: the full content when Miniflux provided it
-      // deep items also carry "light_summary": the summary shown when it was promoted
+      "content": null             // the full content when the source provided it
     }
   ],
   "digests": [
@@ -57,11 +56,11 @@ Returns `201` with the work package. Calling it again before summaries arrive is
 
 How to use it:
 
-- For each `light` item write a light summary from the title and excerpt, following `instructions.global` and `instructions.light`, then the source's `prompt_override` if it has one.
-- For each `deep` item write the deeper summary, following `instructions.deep`.
+- For each item write the deeper summary, following `instructions.global` and `instructions.deep`, then the source's `prompt_override` if it has one. An item is in the package only because the user promoted it. Items are triaged on their title and excerpt, so nothing else is summarized.
+- Promoted items from a source set to use Karakeep summaries (while the user has a Karakeep connection) are not included: Karakeep's own summary is shown for them.
 - For each digest write one summary of all its entries, following `instructions.digest`.
 - Items from disabled sources are never included.
-- Deep items come first, then light items newest first. A package holds at most 200 individual items. Anything over that stays pending and goes out in a later run.
+- Items come newest first. A package holds at most 200 items. Anything over that stays pending and goes out in a later run.
 - A digest holds at most 100 entries, newest first. Entries over that stay pending and go into the next digest.
 
 ## `POST /api/v1/runs/{run_id}/summaries`
@@ -69,7 +68,6 @@ How to use it:
 ```jsonc
 {
   "summaries": [
-    { "id": "itm_123", "stage": "light", "summary_md": "..." },
     { "id": "itm_456", "stage": "deep",  "summary_md": "..." },
     { "id": "dig_7",   "stage": "light", "summary_md": "..." }   // digests use stage "light"
   ]
@@ -80,8 +78,8 @@ Returns `200`:
 
 ```jsonc
 {
-  "accepted": 3,
-  "skipped": [ { "id": "itm_999", "reason": "not waiting for a light summary" } ]
+  "accepted": 2,
+  "skipped": [ { "id": "itm_999", "reason": "not waiting for a deep summary" } ]
 }
 ```
 
@@ -90,4 +88,5 @@ Returns `200`:
 - An item that gets no summary stays pending and is offered again at the next run.
 - `summary_md` is Markdown, 1 to 20,000 characters. The request body is limited to 8 MB.
 - `404` if `run_id` does not exist or belongs to another user. `413` if the body is over 8 MB; send fewer summaries per call.
-- A stored light summary moves the item to `light` and places it in the list for the run's day (`day` in the work package), even if the summaries arrive after midnight. A deep summary moves it to `deep`. A digest summary moves the digest and the entries that run sent to `light`.
+- A stored deep summary moves the item to `deep` and places it in the list for the run's day (`day` in the work package), even if the summaries arrive after midnight. A digest summary moves the digest and the entries that run sent to `light`. A summary for an individual item that is not promoted is skipped.
+- When the user has a Karakeep connection, Claude's summary for a promoted item is later written over the bookmark's own summary in Karakeep, after the delay set on the Sources page (default 30 minutes after the bookmark was created).

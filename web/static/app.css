@@ -12,6 +12,11 @@
 .item .controls button { margin: 0; width: auto; }
 .item .controls [data-badge], .item .controls [data-notice] { order: -1; flex-basis: 100%; text-align: center; }
 .item .controls [data-badge] { flex-basis: auto; }
+.item .excerpt { color: var(--pico-muted-color); }
+
+/* Swipe left deletes, except on a promoted card, where it archives the bookmark. */
+.item .label-archive, .item[data-promoted="true"] .label-delete, .item[data-state="deep"] .label-delete { display: none; }
+.item[data-promoted="true"] .label-archive, .item[data-state="deep"] .label-archive { display: inline; }
 
 /* Once actioned, only the chosen button stays, pushed to its side, with Undo beside it. */
 .item[data-state="archived"] .controls { justify-content: flex-start; }

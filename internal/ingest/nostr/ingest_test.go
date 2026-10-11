@@ -140,7 +140,7 @@ func TestRunMirrorsSourcesAndPullsPostsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if excerpt != "First line of a note and more" || state != "pending_light" || mt != "post" || !strings.HasPrefix(url, "https://njump.me/note1") {
+	if excerpt != "First line of a note and more" || state != "light" || mt != "post" || !strings.HasPrefix(url, "https://njump.me/note1") {
 		t.Fatalf("note = %q %q %q %q", excerpt, state, mt, url)
 	}
 	if got := count(t, st, `SELECT COUNT(*) FROM items WHERE title = 'A Long Read' AND media_type = 'article'`); got != 1 {

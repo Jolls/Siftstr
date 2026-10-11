@@ -40,14 +40,14 @@ KEY=...   # the key
 curl -s -X POST -H "Authorization: Bearer $KEY" http://localhost:8081/api/v1/runs   # note run_id and item ids
 curl -s -X POST -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   http://localhost:8081/api/v1/runs/RUN_ID/summaries \
-  -d '{"summaries":[{"id":"itm_123","stage":"light","summary_md":"A canned summary."}]}'
+  -d '{"summaries":[{"id":"itm_123","stage":"deep","summary_md":"A canned summary."}]}'
 ```
 
-Send one summary per `items[].id` from the work package. Items now appear on Today. The full contract is in [API.md](API.md).
+Send one summary per `items[].id` from the work package. Only promoted items and digests are in it, so promote an item on Today first. Its card comes back with the summary. The full contract is in [API.md](API.md).
 
 ## What to try
 
-- **Today and Backlog:** triage items, and check that unsummarized or carried-over items land in the Backlog.
+- **Today and Backlog:** triage items, and check that carried-over items land in the Backlog.
 - **Gestures and keys:** archive, promote and keep, by swipe, keyboard and buttons. Promoted items come back once with a deeper summary (run the morning recipe again and send a `deep` summary).
 - **Undo** within the hold. Afterwards the **Activity** page shows the held actions and lets you release them now.
 - **`/read`** and the markdown briefing at `./.local/dev-data/briefings/<user>/YYYY-MM-DD.md`.

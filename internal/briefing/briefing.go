@@ -17,7 +17,8 @@ import (
 
 // Outcomes an entry can show. Empty means still waiting for a decision.
 const (
-	OutcomeArchived = "archived"
+	OutcomeDeleted  = "deleted"
+	OutcomeArchived = "archived" // deleted after being promoted: the Karakeep bookmark stays
 	OutcomeKept     = "kept"
 	OutcomePromoted = "promoted"
 	OutcomeCarried  = "carried over"
@@ -35,7 +36,8 @@ type Entry struct {
 	URL       string
 	Source    string
 	MediaType string
-	Summary   string
+	Excerpt   string // what the item was triaged on; shown when there is no summary
+	Summary   string // a digest's, or a promoted item's
 	Outcome   string
 }
 
@@ -57,8 +59,11 @@ type Service struct {
 // New returns a Service that writes under dir.
 func New(db *sql.DB, dir string) *Service { return &Service{DB: db, Dir: dir} }
 
-// Build assembles userID's briefing for day. Today is what was summarized
-// that day, with whatever outcome it has now. Backlog is what earlier days
+// Build assembles userID's briefing for day. Today is what arrived that day,
+// with whatever outcome it has now. An item is listed with its excerpt, and
+// with a summary once it has one (a digest always does, a promoted item when
+// its summary has come in), so a promoted item's summary appears at the next
+// rewrite rather than live (Q25). Backlog is what earlier days
 // left waiting. With final set, an entry still waiting reads "carried over".
 func (s *Service) Build(ctx context.Context, userID, day string, final bool) (Briefing, error) {
 	b := Briefing{Day: day, Final: final}
@@ -72,10 +77,13 @@ func (s *Service) Build(ctx context.Context, userID, day string, final bool) (Br
 	return b, nil
 }
 
-func outcome(state string, final bool) string {
+func outcome(state string, promoted, final bool) string {
 	switch state {
 	case "archived":
-		return OutcomeArchived
+		if promoted {
+			return OutcomeArchived
+		}
+		return OutcomeDeleted
 	case "kept":
 		return OutcomeKept
 	case "pending_deep":
@@ -92,8 +100,8 @@ func outcome(state string, final bool) string {
 // entries lists items, then digests, matching cond (written against alias x).
 // Entries inside a digest are covered by the digest and not listed.
 func (s *Service) entries(ctx context.Context, userID, cond, day string, final bool) ([]Entry, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT x.id, x.title, x.url, src.name, x.media_type, x.state,
-		COALESCE(NULLIF(x.deep_summary, ''), x.light_summary, '')
+	rows, err := s.DB.QueryContext(ctx, `SELECT x.id, x.title, x.url, COALESCE(NULLIF(x.byline, ''), src.name), x.media_type, x.state,
+		x.excerpt, COALESCE(NULLIF(x.deep_summary, ''), x.light_summary, ''), x.promoted_at IS NOT NULL
 		FROM items x JOIN sources src ON src.user_id = x.user_id AND src.id = x.source_id
 		WHERE x.user_id = ? AND x.digest_id IS NULL AND `+cond+`
 		ORDER BY COALESCE(x.published_at, x.created_at) DESC, x.id`, userID, day)
@@ -104,11 +112,12 @@ func (s *Service) entries(ctx context.Context, userID, cond, day string, final b
 	for rows.Next() {
 		var e Entry
 		var state string
-		if err := rows.Scan(&e.ID, &e.Title, &e.URL, &e.Source, &e.MediaType, &state, &e.Summary); err != nil {
+		var promoted bool
+		if err := rows.Scan(&e.ID, &e.Title, &e.URL, &e.Source, &e.MediaType, &state, &e.Excerpt, &e.Summary, &promoted); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		e.Outcome = outcome(state, final)
+		e.Outcome = outcome(state, promoted, final)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -134,7 +143,7 @@ func (s *Service) entries(ctx context.Context, userID, cond, day string, final b
 			return nil, err
 		}
 		e.Title = e.Source + " digest"
-		e.Outcome = outcome(state, final)
+		e.Outcome = outcome(state, false, final)
 		out = append(out, e)
 	}
 	return out, drows.Err()

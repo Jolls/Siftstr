@@ -88,3 +88,27 @@ func TestStatic(t *testing.T) {
 		}
 	}
 }
+
+// A card shows its excerpt until it has a summary, and the swipe-left button
+// reads Delete, or Archive on a promoted card (the page picks by data-promoted).
+func TestItemExcerptAndDeleteLabel(t *testing.T) {
+	body := render(t, "items", Page{
+		User: &User{Name: "a"}, Active: "today", Heading: "Today",
+		Items: []Item{
+			{ID: "itm_1", Title: "A", State: "light", Excerpt: "only the excerpt"},
+			{ID: "itm_2", Title: "B", State: "deep", Excerpt: "hidden excerpt", Summary: "the summary", Promoted: true},
+		},
+	})
+	for _, want := range []string{
+		`<p class="excerpt">only the excerpt</p>`, `<p class="summary">the summary</p>`,
+		`data-promoted="false"`, `data-promoted="true"`,
+		`<span class="label-delete">Delete</span><span class="label-archive">Archive</span>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(body, "hidden excerpt") {
+		t.Error("the excerpt should give way to the summary")
+	}
+}

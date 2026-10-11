@@ -48,7 +48,7 @@ internal/ui/            HTMX handlers and templates
 internal/triage/        item state machine, action log, undo
 internal/sync/          /sync/actions endpoint and reconciliation
 internal/briefing/      builds the daily briefing; renders /read and the markdown file
-internal/ingest/        miniflux/, nostr/
+internal/ingest/        shared placement and Karakeep-bookmark helpers; miniflux/, nostr/, karakeep/ (bookmarks as a source, and reading Karakeep's summary back)
 internal/dest/          miniflux/, karakeep/, metube/, youtube/  (Destination impls)
 internal/outbox/        queue and workers
 internal/janitor/       six-month cleanup and the daily database snapshot

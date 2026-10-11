@@ -65,12 +65,12 @@ Send the key as "Authorization: Bearer <KEY>" on every request.
 1. POST <BASE_URL>/api/v1/runs. The response is a JSON work package.
 2. Write a summary for every entry in "items" and "digests". Follow
    "instructions.global" plus the instruction for the entry's stage
-   ("light", "deep", or "digest" for digests), then the entry's
+   ("deep" for items, "digest" for digests), then the entry's
    source.prompt_override if it is not null. Use only what the package gives
    you, except where a deep instruction tells you to fetch the page.
 3. POST <BASE_URL>/api/v1/runs/<run_id>/summaries with
-   {"summaries": [{"id": "...", "stage": "light" | "deep", "summary_md": "..."}]}.
-   Digests use their "dig_" id with stage "light".
+   {"summaries": [{"id": "...", "stage": "deep" | "light", "summary_md": "..."}]}.
+   Items use stage "deep". Digests use their "dig_" id with stage "light".
 4. Report how many summaries were accepted and list any skipped.
 
 If a step fails, stop and report the error. Do not retry in a loop.

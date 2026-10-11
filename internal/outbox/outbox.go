@@ -45,6 +45,8 @@ type Entry struct {
 	Payload      json.RawMessage
 	Key          string // dedupe key
 	Attempts     int
+	// NotBefore, when set, is the earliest time the entry may be sent.
+	NotBefore time.Time
 }
 
 // Execer is satisfied by *sql.DB and *sql.Tx, so Enqueue can join a
@@ -73,17 +75,25 @@ func Enqueue(ctx context.Context, x Execer, now time.Time, e Entry, key string) 
 	if len(e.Payload) == 0 {
 		e.Payload = json.RawMessage(`{}`)
 	}
+	due := ""
+	if !e.NotBefore.IsZero() {
+		due = stamp(e.NotBefore)
+	}
 	r, err := x.ExecContext(ctx,
 		`INSERT INTO outbox (id, user_id, action_id, connection_id, op, payload, status, attempts, created_at, next_attempt_at, dedupe_key)
-		 VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, '', ?)
+		 VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
 		 ON CONFLICT DO NOTHING`,
-		id, e.UserID, nullable(e.ActionID), nullable(e.ConnectionID), e.Op, string(e.Payload), stamp(now), nullable(key))
+		id, e.UserID, nullable(e.ActionID), nullable(e.ConnectionID), e.Op, string(e.Payload), stamp(now), due, nullable(key))
 	if err != nil {
 		return false, err
 	}
 	n, _ := r.RowsAffected()
 	return n > 0, nil
 }
+
+// deferred is implemented by errors that mean "not yet": the entry is tried
+// again after the returned wait, without counting as a failed attempt.
+type deferred interface{ Defer() time.Duration }
 
 // Permanent is implemented by errors that retrying cannot fix, such as a
 // rejected credential or a connection that was removed.
@@ -141,7 +151,12 @@ func (r *Runner) Run(ctx context.Context, userID string) (Stats, error) {
 		herr := r.Handle(ctx, e)
 		attempts := e.Attempts + 1
 		var perr permanent
+		var derr deferred
 		switch {
+		case herr != nil && errors.As(herr, &derr):
+			_, err = r.DB.ExecContext(ctx, `UPDATE outbox SET last_error = ?, next_attempt_at = ? WHERE id = ? AND user_id = ?`,
+				herr.Error(), stamp(r.Now().Add(derr.Defer())), e.ID, userID)
+			st.Retried++
 		case herr == nil:
 			_, err = r.DB.ExecContext(ctx, `UPDATE outbox SET status = 'done', attempts = ?, last_error = NULL, done_at = ? WHERE id = ? AND user_id = ?`,
 				attempts, stamp(r.Now()), e.ID, userID)

@@ -43,7 +43,8 @@ func newFixture(t *testing.T) *fixture {
 		('src1','u1','miniflux_feed','1','Some Blog','individual','carry','Be terse.',1),
 		('src2','u1','miniflux_feed','2','r/news','digest','drop',NULL,1),
 		('src3','u1','miniflux_feed','3','Muted','individual','carry',NULL,0),
-		('src9','u2','miniflux_feed','1','Other Blog','individual','carry',NULL,1)`)
+		('src9','u2','miniflux_feed','1','Other Blog','individual','carry',NULL,1),
+		('src9x','u1','miniflux_feed','9','Plain Feed','individual','carry',NULL,1)`)
 	return f
 }
 
@@ -95,14 +96,14 @@ func golden(t *testing.T, name string, v any) {
 func TestWorkPackageGolden(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
-	f.item(t, "itm_a", "u1", "src1", "pending_light", "Newer post", "2026-10-09T01:00:00Z")
-	f.item(t, "itm_b", "u1", "src1", "pending_light", "Older post")
+	f.item(t, "itm_a", "u1", "src1", "light", "Newer post", "2026-10-09T01:00:00Z") // triaged on its excerpt, so not offered
+	f.item(t, "itm_b", "u1", "src1", "light", "Older post")
 	f.item(t, "itm_d", "u1", "src1", "pending_deep", "Promoted post")
 	f.exec(t, `UPDATE items SET light_summary = 'earlier light summary' WHERE id = 'itm_d'`)
 	f.item(t, "itm_e", "u1", "src2", "pending_light", "Headline one", "2026-10-08T09:00:00Z")
 	f.item(t, "itm_f", "u1", "src2", "pending_light", "Headline two", "2026-10-08T10:00:00Z")
-	f.item(t, "itm_m", "u1", "src3", "pending_light", "From a muted source")
-	f.item(t, "itm_x", "u2", "src9", "pending_light", "Belongs to another user")
+	f.item(t, "itm_m", "u1", "src3", "pending_deep", "From a muted source")
+	f.item(t, "itm_x", "u2", "src9", "pending_deep", "Belongs to another user")
 	f.item(t, "itm_done", "u1", "src1", "archived", "Already triaged")
 
 	wp, err := f.s.Create(ctx, "u1")
@@ -110,6 +111,41 @@ func TestWorkPackageGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "work_package.golden.json", wp)
+}
+
+// A promoted item whose source uses Karakeep summaries gets Karakeep's, so
+// Claude is not asked for one, unless the user has no Karakeep connection, in
+// which case the source behaves as `agent`.
+func TestPromotedKarakeepItemsAreNotOffered(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	f.exec(t, `UPDATE sources SET summary_source = 'karakeep' WHERE id = 'src1'`)
+	f.exec(t, `INSERT INTO sources (id, user_id, kind, external_id, name) VALUES ('src_kk','u1','karakeep','karakeep','Karakeep')`)
+	f.item(t, "itm_p", "u1", "src1", "pending_deep", "Promoted from a karakeep-summary feed")
+	f.item(t, "itm_k", "u1", "src_kk", "pending_deep", "Promoted from Karakeep itself")
+	f.item(t, "itm_plain", "u1", "src9x", "pending_deep", "Promoted from a normal feed")
+
+	wp, err := f.s.Create(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wp.Items) != 3 {
+		t.Fatalf("without a Karakeep connection both sources behave as agent: items = %d", len(wp.Items))
+	}
+
+	f.exec(t, `INSERT INTO connections (id, user_id, kind, base_url) VALUES ('c1','u1','karakeep','https://kk.example.com')`)
+	wp, err = f.s.Create(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wp.Items) != 1 || wp.Items[0].ID != "itm_plain" {
+		t.Fatalf("items = %+v, want only the item from the normal feed", wp.Items)
+	}
+
+	f.exec(t, `INSERT INTO connections (id, user_id, kind, base_url) VALUES ('c2','u2','karakeep','https://kk.example.com')`)
+	if wp, _ = f.s.Create(ctx, "u1"); len(wp.Items) != 1 {
+		t.Fatal("another user's connection changed this user's package")
+	}
 }
 
 func TestCreateIsRepeatableReusesRunAndDigest(t *testing.T) {
@@ -136,19 +172,19 @@ func TestCreateIsRepeatableReusesRunAndDigest(t *testing.T) {
 func TestSubmitMovesItemsAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
-	f.item(t, "itm_a", "u1", "src1", "pending_light", "A")
+	f.item(t, "itm_a", "u1", "src1", "light", "A")
 	f.item(t, "itm_d", "u1", "src1", "pending_deep", "D")
 	f.item(t, "itm_e", "u1", "src2", "pending_light", "E")
-	f.item(t, "itm_x", "u2", "src9", "pending_light", "Not yours")
+	f.item(t, "itm_x", "u2", "src9", "pending_deep", "Not yours")
 	wp, err := f.s.Create(ctx, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	batch := []Summary{
-		{ID: "itm_a", Stage: "light", MD: " light A "},
-		{ID: "itm_d", Stage: "deep", MD: "deep D"},
+		{ID: "itm_a", Stage: "light", MD: " light A "}, // never offered: it is triaged on its excerpt
+		{ID: "itm_d", Stage: "deep", MD: " deep D "},
 		{ID: wp.Digests[0].ID, Stage: "light", MD: "digest text"},
-		{ID: "itm_x", Stage: "light", MD: "sneaky"},
+		{ID: "itm_x", Stage: "deep", MD: "sneaky"},
 		{ID: "itm_a", Stage: "deep", MD: "wrong stage now"},
 		{ID: "itm_nope", Stage: "light", MD: "missing"},
 		{ID: "itm_a", Stage: "light", MD: "  "},
@@ -158,24 +194,24 @@ func TestSubmitMovesItemsAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Accepted != 3 || len(res.Skipped) != 5 {
+	if res.Accepted != 2 || len(res.Skipped) != 6 {
 		t.Fatalf("result = %+v", res)
 	}
 	golden(t, "submit_result.golden.json", res)
-	for id, want := range map[string]string{"itm_a": "light", "itm_d": "deep", "itm_e": "light", "itm_x": "pending_light"} {
+	for id, want := range map[string]string{"itm_a": "light", "itm_d": "deep", "itm_e": "light", "itm_x": "pending_deep"} {
 		if got := f.state(t, id); got != want {
 			t.Errorf("%s = %s, want %s", id, got, want)
 		}
 	}
 	var sum, day string
-	_ = f.st.DB().QueryRow(`SELECT light_summary, batch_date FROM items WHERE id = 'itm_a'`).Scan(&sum, &day)
-	if sum != "light A" || day != "2026-10-09" {
+	_ = f.st.DB().QueryRow(`SELECT deep_summary, batch_date FROM items WHERE id = 'itm_d'`).Scan(&sum, &day)
+	if sum != "deep D" || day != "2026-10-09" {
 		t.Fatalf("stored %q on %q", sum, day)
 	}
 
 	// The same batch again changes nothing and accepts nothing.
-	res, err = f.s.Submit(ctx, "u1", wp.RunID, batch[:3])
-	if err != nil || res.Accepted != 0 || len(res.Skipped) != 3 {
+	res, err = f.s.Submit(ctx, "u1", wp.RunID, batch[1:3])
+	if err != nil || res.Accepted != 0 || len(res.Skipped) != 2 {
 		t.Fatalf("replay = %+v, %v", res, err)
 	}
 	var fin *string
@@ -297,11 +333,11 @@ func TestPromptsDefaultOverrideAndReset(t *testing.T) {
 	}
 }
 
-func TestPackageCapsIndividualItems(t *testing.T) {
+func TestPackageCapsPromotedItems(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
 	for i := 0; i < MaxItemsPerRun+5; i++ {
-		f.item(t, fmt.Sprintf("itm_%04d", i), "u1", "src1", "pending_light", "t")
+		f.item(t, fmt.Sprintf("itm_%04d", i), "u1", "src1", "pending_deep", "t")
 	}
 	wp, err := f.s.Create(ctx, "u1")
 	if err != nil || len(wp.Items) != MaxItemsPerRun {
@@ -397,10 +433,10 @@ func TestSummariesLandOnTheRunsDayEvenIfSubmittedLater(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
 	f.now = time.Date(2026, 10, 9, 23, 55, 0, 0, time.UTC)
-	f.item(t, "itm_a", "u1", "src1", "pending_light", "A")
+	f.item(t, "itm_a", "u1", "src1", "pending_deep", "A")
 	wp, _ := f.s.Create(ctx, "u1")
 	f.now = time.Date(2026, 10, 10, 0, 5, 0, 0, time.UTC) // after midnight
-	if _, err := f.s.Submit(ctx, "u1", wp.RunID, []Summary{{ID: "itm_a", Stage: "light", MD: "x"}}); err != nil {
+	if _, err := f.s.Submit(ctx, "u1", wp.RunID, []Summary{{ID: "itm_a", Stage: "deep", MD: "x"}}); err != nil {
 		t.Fatal(err)
 	}
 	var day string
@@ -413,9 +449,9 @@ func TestSummariesLandOnTheRunsDayEvenIfSubmittedLater(t *testing.T) {
 func TestRetryDoesNotOverwriteRunRecord(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
-	f.item(t, "itm_a", "u1", "src1", "pending_light", "A")
+	f.item(t, "itm_a", "u1", "src1", "pending_deep", "A")
 	wp, _ := f.s.Create(ctx, "u1")
-	batch := []Summary{{ID: "itm_a", Stage: "light", MD: "x"}}
+	batch := []Summary{{ID: "itm_a", Stage: "deep", MD: "x"}}
 	if _, err := f.s.Submit(ctx, "u1", wp.RunID, batch); err != nil {
 		t.Fatal(err)
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/dest/karakeep"
 	"github.com/Jolls/Siftstr/internal/dest/metube"
 	destminiflux "github.com/Jolls/Siftstr/internal/dest/miniflux"
+	ingestkarakeep "github.com/Jolls/Siftstr/internal/ingest/karakeep"
 	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
 	"github.com/Jolls/Siftstr/internal/ingest/nostr"
 	"github.com/Jolls/Siftstr/internal/janitor"
@@ -181,6 +182,24 @@ func serve() error {
 	}); err != nil {
 		return err
 	}
+	kkSync := &ingestkarakeep.Syncer{DB: st.DB(), Conns: conns, New: ingestkarakeep.ClientFactory, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		// Offers the bookmarks Karakeep collected for triage, then reads
+		// Karakeep's summary back for promoted items that use it.
+		Name: "karakeep", Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := kkSync.Run(ctx, userID)
+			if errors.Is(err, ingestkarakeep.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if res.Items > 0 || res.Resolved > 0 || res.GaveUp > 0 {
+				log.Printf("karakeep: %d new items, %d summaries read, %d items shown without one", res.Items, res.Resolved, res.GaveUp)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
 	if err := sched.Register(scheduler.Job{
 		// Marks actions whose undo hold has ended as released and queues their
 		// upstream effects in the outbox.
@@ -192,7 +211,7 @@ func serve() error {
 	}); err != nil {
 		return err
 	}
-	sender := &writeback.Sender{Conns: conns, Factories: map[string]dest.Factory{
+	sender := &writeback.Sender{DB: st.DB(), Conns: conns, Factories: map[string]dest.Factory{
 		writeback.Miniflux: destminiflux.Factory,
 		writeback.Karakeep: karakeep.Factory,
 		writeback.MeTube:   metube.Factory,

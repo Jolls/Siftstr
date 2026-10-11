@@ -45,7 +45,7 @@ func (e *env) apiUser(t *testing.T, name string) (userID, key string) {
 		t.Fatal(err)
 	}
 	if _, err := e.st.DB().Exec(`INSERT INTO items (id, user_id, source_id, external_id, media_type, url, title, state, created_at, updated_at)
-		VALUES (?, ?, ?, '1', 'article', 'https://example.com/x', ?, 'pending_light', 'c', 'c')`, "itm_"+name, u.ID, src, name+" item"); err != nil {
+		VALUES (?, ?, ?, '1', 'article', 'https://example.com/x', ?, 'pending_deep', 'c', 'c')`, "itm_"+name, u.ID, src, name+" item"); err != nil {
 		t.Fatal(err)
 	}
 	return u.ID, key
@@ -88,18 +88,18 @@ func TestRunRoundTripOverHTTP(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &wp); err != nil {
 		t.Fatal(err)
 	}
-	if len(wp.Items) != 1 || wp.Items[0].ID != "itm_alice" || wp.Items[0].Stage != "light" {
+	if len(wp.Items) != 1 || wp.Items[0].ID != "itm_alice" || wp.Items[0].Stage != "deep" {
 		t.Fatalf("package = %s", body)
 	}
 
-	payload := `{"summaries":[{"id":"itm_alice","stage":"light","summary_md":"A short summary."}]}`
+	payload := `{"summaries":[{"id":"itm_alice","stage":"deep","summary_md":"A short summary."}]}`
 	code, body = e.apiCall(t, key, "POST", "/api/v1/runs/"+wp.RunID+"/summaries", payload)
 	if code != http.StatusOK || !strings.Contains(body, `"accepted":1`) {
 		t.Fatalf("submit = %d %s", code, body)
 	}
 	var state string
 	_ = e.st.DB().QueryRow(`SELECT state FROM items WHERE id = 'itm_alice'`).Scan(&state)
-	if state != "light" {
+	if state != "deep" {
 		t.Fatalf("state = %s", state)
 	}
 	// Sending the batch again is harmless.
@@ -134,13 +134,13 @@ func TestRunsAPIIsolationBetweenUsers(t *testing.T) {
 	}
 	_ = json.Unmarshal([]byte(bobBody), &bw)
 	code, body = e.apiCall(t, bobKey, "POST", "/api/v1/runs/"+bw.RunID+"/summaries",
-		`{"summaries":[{"id":"itm_alice","stage":"light","summary_md":"hijack"}]}`)
+		`{"summaries":[{"id":"itm_alice","stage":"deep","summary_md":"hijack"}]}`)
 	if code != http.StatusOK || !strings.Contains(body, `"accepted":0`) {
 		t.Fatalf("cross-user submit = %d %s", code, body)
 	}
 	var state string
 	_ = e.st.DB().QueryRow(`SELECT state FROM items WHERE id = 'itm_alice'`).Scan(&state)
-	if state != "pending_light" {
+	if state != "pending_deep" {
 		t.Fatalf("alice's item changed to %s", state)
 	}
 }

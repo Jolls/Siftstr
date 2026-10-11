@@ -222,8 +222,23 @@ func (s *server) page(sess *session, active, title string) ui.Page {
 	return ui.Page{Title: title, Active: active, User: &ui.User{ID: sess.User.ID, Name: sess.User.Username}, CSRF: sess.CSRF, Problems: sess.Problems}
 }
 
-// badges are the words an actioned card shows. gestures.js has the same table.
-var badges = map[string]string{"archived": "archived", "kept": "kept", "pending_deep": "promoted"}
+// badge is the word an actioned card shows. gestures.js has the same rule.
+// The stored state is "archived" for both swipe-left outcomes (Q28), so a card
+// that was promoted first reads "archived" and any other reads "deleted".
+func badge(state string, promoted bool) string {
+	switch state {
+	case "archived":
+		if promoted {
+			return "archived"
+		}
+		return "deleted"
+	case "kept":
+		return "kept"
+	case "pending_deep":
+		return "promoted"
+	}
+	return ""
+}
 
 // itemsPage renders one list of cards: today's, or the carried-over backlog.
 func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter, *http.Request, *session) {
@@ -243,7 +258,8 @@ func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter
 		for _, c := range cards {
 			p.Items = append(p.Items, ui.Item{
 				ID: c.ID, Title: c.Title, URL: c.URL, Source: c.Source, MediaType: c.MediaType,
-				Summary: c.Summary, State: c.State, Badge: badges[c.State], CanPromote: c.CanPromote,
+				Excerpt: c.Excerpt, Summary: c.Summary, State: c.State, Promoted: c.Promoted,
+				Badge: badge(c.State, c.Promoted), CanPromote: c.CanPromote,
 				Kind: c.Kind, UndoID: c.UndoID,
 			})
 		}

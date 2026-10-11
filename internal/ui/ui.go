@@ -77,6 +77,9 @@ type KeepOption struct {
 type IngestForm struct {
 	ExcerptLength int
 	MaxAgeDays    int
+
+	KarakeepSummaryDelayMinutes int
+	KarakeepSummaryTimeoutHours int
 }
 
 // KeyRow is one API key on /settings/keys. The key itself is never part of
@@ -115,6 +118,7 @@ type SourceRow struct {
 	Carryover      string
 	PromptOverride string
 	Enabled        bool
+	SummarySource  string // agent | karakeep
 }
 
 // Destination is one upstream connection form on /settings/destinations.
@@ -142,9 +146,11 @@ type Item struct {
 	URL        string
 	Source     string
 	MediaType  string
+	Excerpt    string // shown until the card has a summary
 	Summary    string
 	State      string // item state, see ARCHITECTURE.md §5
-	Badge      string // "archived", "promoted", "kept", or empty
+	Promoted   bool   // has been promoted, so swipe left archives instead of deleting
+	Badge      string // "deleted", "archived", "promoted", "kept", or empty
 	CanPromote bool
 	Kind       string // "item" or "digest": the subject type actions use
 	UndoID     string // the held action that can still be undone, if any

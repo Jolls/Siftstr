@@ -36,7 +36,7 @@ func TestSummariesReachReadPageAndFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, body := e.apiCall(t, aliceKey, "POST", "/api/v1/runs/"+wp.RunID+"/summaries",
-		`{"summaries":[{"id":"itm_alice","stage":"light","summary_md":"Alice summary text."}]}`)
+		`{"summaries":[{"id":"itm_alice","stage":"deep","summary_md":"Alice summary text."}]}`)
 	if code != http.StatusOK || !strings.Contains(body, `"accepted":1`) {
 		t.Fatalf("submit = %d %s", code, body)
 	}
@@ -94,7 +94,7 @@ func TestNextRunClosesPreviousDayFile(t *testing.T) {
 		t.Fatalf("create = %d %s", code, body)
 	}
 	file, err := os.ReadFile(filepath.Join(e.briefDir, "alice", "2000-01-01.md"))
-	if err != nil || !strings.Contains(string(file), "final: true") || !strings.Contains(string(file), "**archived**") {
+	if err != nil || !strings.Contains(string(file), "final: true") || !strings.Contains(string(file), "**deleted**") {
 		t.Fatalf("earlier day not closed: %v\n%s", err, file)
 	}
 }

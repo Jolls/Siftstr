@@ -1,0 +1,67 @@
+// Drives gestures.js init() against a minimal fake DOM, so a mistake in the
+// code that updates a card (which the pure-function tests cannot see) shows up
+// as a failing test instead of a card with no Undo button.
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { init } = require("../static/gestures.js");
+
+function el(attrs, parts) {
+  const node = { dataset: attrs, hidden: false, textContent: "", parts: parts || {}, listeners: {} };
+  node.querySelector = (sel) => node.parts[sel] || null;
+  node.matches = (sel) => sel === "article.item";
+  node.focus = () => {};
+  node.closest = () => node;
+  return node;
+}
+
+function page() {
+  const parts = {
+    "[data-badge]": { hidden: true, textContent: "" },
+    '[data-action="undo"]': { hidden: true },
+    '[data-action="promote"]': { hidden: false },
+    "[data-notice]": { hidden: true, textContent: "" },
+  };
+  const card = el({ itemId: "itm_1", subjectType: "item", state: "light", canPromote: "true", undoAction: "", promoted: "false" }, parts);
+  const handlers = {};
+  const list = {
+    querySelector: () => card,
+    querySelectorAll: () => [card],
+    addEventListener: (type, fn) => { handlers[type] = fn; },
+  };
+  const docHandlers = {};
+  const doc = {
+    body: {}, activeElement: card,
+    querySelector: (sel) => (sel === ".items" ? list : null),
+    addEventListener: (type, fn) => { docHandlers[type] = fn; },
+  };
+  const queued = [];
+  const win = { siftQueue: { enqueue: (a) => { const x = Object.assign({ action_id: "act_" + (queued.length + 1) }, a); queued.push(x); return x; } } };
+  init(doc, win);
+  return { card, parts, handlers, docHandlers, queued };
+}
+
+test("acting on a card shows its badge and an Undo, whatever the source", () => {
+  const p = page();
+  p.handlers.click({ target: { closest: () => ({ dataset: { action: "archive" }, closest: () => p.card }) } });
+  assert.equal(p.queued.length, 1);
+  assert.equal(p.card.dataset.state, "archived");
+  assert.equal(p.parts["[data-badge]"].textContent, "deleted");
+  assert.equal(p.parts["[data-badge]"].hidden, false);
+  assert.equal(p.parts['[data-action="undo"]'].hidden, false);
+  assert.equal(p.card.dataset.undoAction, "act_1");
+});
+
+test("a promoted card that is archived reads archived, and a key undoes it", () => {
+  const p = page();
+  p.card.dataset.state = "deep";
+  p.card.dataset.promoted = "true";
+  p.docHandlers.keydown({ key: "ArrowLeft", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+  assert.equal(p.parts["[data-badge]"].textContent, "archived");
+  p.docHandlers.keydown({ key: "z", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+  assert.equal(p.queued.length, 2);
+  assert.equal(p.queued[1].kind, "undo");
+  assert.equal(p.queued[1].target_action_id, "act_1");
+  assert.equal(p.card.dataset.state, "deep");
+  assert.equal(p.parts['[data-action="undo"]'].hidden, true);
+});
