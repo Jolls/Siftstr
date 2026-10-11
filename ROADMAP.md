@@ -37,6 +37,12 @@ The data model, auth, scoping, and per-user connections already support multiple
 
 ---
 
+## Experiment: Karakeep summaries
+
+A per-source `summary_source` setting (`agent` or `karakeep`) lets a feed be triaged on Karakeep's own AI summary instead of Claude's light one. Claude stays for light summaries on `agent` feeds (Nostr, custom prompts, anything Karakeep summarizes poorly) and for digests; the deeper summary on promote is Karakeep's, so there is no Claude deep pass. On keep, an `agent` feed's summary reaches Karakeep through a delayed overwrite. The aim is to try both on real feeds and see which gives the better triage experience. Design in ARCHITECTURE.md §6 and §7, with the open timing questions at Q23 to Q25. If `karakeep` wins for most feeds, the Claude path can shrink to the special cases, or give way to the local summarizer below.
+
+---
+
 ## Later
 
 - **MCP server or plugin** as an alternative to the scheduled-task API.

@@ -20,7 +20,7 @@ Don't break any of these without updating ARCHITECTURE.md and asking the user fi
 
 - **No LLM calls in the app.** Summaries come from Claude through the JSON API. Don't add model SDKs.
 - **Never download media.** No yt-dlp. Downloads are delegated to a destination such as MeTube.
-- **Source services are the system of record.** Siftstr stores only workflow state (queue, summaries, decisions, outbox, settings), and that state is deleted after 6 months.
+- **Source services are the system of record.** Siftstr stores only workflow state (queue, summaries, decisions, outbox, settings), and that state is deleted after 6 months. The one exception is a source set to use Karakeep summaries (`summary_source = karakeep`): its bookmarks are created in Karakeep at ingest, and Karakeep holds them from then on.
 - **All upstream side effects go through the outbox** and must be idempotent and retry-safe.
 - **One Claude run per day.** The morning scheduled task is the only LLM step. Ingest, write-back, carryover, briefing/export, and cleanup are Go code on in-app timers.
 - **SQLite is the source of truth.** The markdown briefing file and `/read` are renderings of it; never parse markdown back in.

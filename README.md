@@ -10,6 +10,38 @@ It is not a reader. Source services stay the system of record, and Siftstr delet
 
 Siftstr makes no LLM calls itself. The summaries come from a Claude scheduled task that talks to Siftstr's JSON API once a day. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [ROADMAP.md](ROADMAP.md) for what is planned.
 
+## How it works
+
+```mermaid
+flowchart TD
+    subgraph ingest ["Ingest (timer)"]
+        MF[Miniflux entries] --> Q{"Per-source setting:<br/>summary_source"}
+        NO[Nostr events] --> Q
+    end
+
+    Q -->|agent| CL["Claude morning run<br/>writes the light summary"]
+    Q -.->|karakeep| KB["Siftstr creates an archived<br/>Karakeep bookmark"]
+    KB -.-> KS["Karakeep's AI summarizes the page;<br/>Siftstr reads the summary back"]
+
+    CL --> T["Triage card<br/>(swipe or key, 15-minute undo hold)"]
+    KS -.-> T
+
+    T -->|Archive| A["Mark read in Miniflux<br/>(karakeep path: also delete the bookmark)"]
+    T -->|Promote| P["Save to Karakeep:<br/>archived, tagged promoted"]
+    P --> PS["Karakeep summarizes the full page"]
+    PS --> D["Card returns with the deeper summary"]
+    D -->|Keep| K
+    D -->|Archive| A
+    T -->|Keep| K["Karakeep bookmark, MeTube download,<br/>mark read in Miniflux"]
+```
+
+- **`agent` feeds** (the default) are triaged on Claude's light summary, ahead of Karakeep. Nothing reaches Karakeep until you promote or keep. Digests and Nostr always use this path.
+- **`karakeep` feeds** (dashed) are triaged on Karakeep's own AI summary. Every item is saved to Karakeep first, so use it only on feeds you are happy to have Karakeep crawl. Promote is not offered, since there is nothing deeper to fetch.
+- **Promote** needs no Claude run. Karakeep's summary of the full page is the deeper one.
+- **Keep** on an `agent` feed also writes Claude's light summary into the bookmark about 30 minutes later, once Karakeep has finished its own.
+
+The dashed `karakeep` path and promote-through-Karakeep are designed in [ARCHITECTURE.md](ARCHITECTURE.md) (§5 to §7) but not built yet.
+
 ## What you need
 
 - A host that runs Docker (amd64 or arm64).
