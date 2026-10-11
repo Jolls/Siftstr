@@ -4,7 +4,7 @@ Guidance for AI coding agents (and humans) working in this repository.
 
 ## Project
 
-**Siftstr** is a self-hosted daily triage gate. It pulls new items from Miniflux (RSS, YouTube channels, Reddit, podcasts, GitHub releases, newsletters) and Nostr. A single Claude scheduled task summarizes them each morning; everything else runs on Siftstr's own timers. The user then sifts each item on their phone or desktop: **archive**, **promote** (come back once with a deeper summary), or **keep** (send to Karakeep, MeTube, and so on). It is not a reader.
+**Siftstr** is a self-hosted daily triage gate. It pulls new items from Miniflux (RSS, YouTube channels, Reddit, podcasts, GitHub releases, newsletters) and Nostr. A single Claude scheduled task summarizes them each morning; everything else runs on Siftstr's own timers. The user then sifts each item on their phone or desktop: **delete**, **promote** (come back once with a summary), or **keep** (send to Karakeep, MeTube, and so on). It is not a reader.
 
 **Status:** pre-implementation. There is no code yet.
 
