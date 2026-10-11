@@ -38,6 +38,9 @@ flowchart TD
     D -->|Keep| K
     D -->|Archive| AR["Bookmark stays in Karakeep,<br/>archived and tagged promoted"]
     T -->|Keep| K["Mark read in Miniflux;<br/>Karakeep bookmark, MeTube download"]
+
+    %% User actions in orange. linkStyle counts edges in the order they are written above.
+    linkStyle 9,10,15,16,17 color:#e8590c,font-weight:bold
 ```
 
 - **Every triage action marks the entry read in Miniflux** (for feeds that come from Miniflux), so nothing you have sifted comes back as unread.
