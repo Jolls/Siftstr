@@ -1,14 +1,54 @@
 # Siftstr
 
-A self-hosted daily triage gate. Siftstr pulls new items from [Miniflux](https://miniflux.app) (RSS, YouTube channels, Reddit, podcasts, GitHub releases, newsletters) and from Nostr. One Claude scheduled task summarizes them each morning. You then sift each item on your phone or desktop:
+A self-hosted daily triage gate. Siftstr pulls new items from [Miniflux](https://miniflux.app) (RSS, YouTube channels, Reddit, podcasts, GitHub releases, newsletters) and from Nostr. You sift each item on your phone or desktop, on its title. A Claude scheduled task writes summaries each morning, but only for digests and for the items you promote.
 
-- **Archive**: you're done with it.
-- **Promote**: come back to it once, with a deeper summary.
+- **Delete**: you're done with it. Its Karakeep bookmark, if it has one, is deleted. The Miniflux entry is only marked read. Once you have promoted an item it is never deleted: the same swipe archives it in Karakeep instead.
+- **Promote**: come back to it once, with a summary.
 - **Keep**: send it on to [Karakeep](https://karakeep.app), [MeTube](https://github.com/alexta69/metube) and so on.
 
 It is not a reader. Source services stay the system of record, and Siftstr deletes its own workflow data after 6 months.
 
 Siftstr makes no LLM calls itself. The summaries come from a Claude scheduled task that talks to Siftstr's JSON API once a day. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [ROADMAP.md](ROADMAP.md) for what is planned.
+
+## How it works
+
+```mermaid
+flowchart TD
+    subgraph ingest ["Ingest (timer)"]
+        KR["Karakeep's own RSS import<br/>and bookmarks you save"] --> KQ["Timer: list unarchived bookmarks.<br/>Skip if too old, already in Siftstr,<br/>or tagged sifted"]
+        MF[Miniflux entries] --> Q{"Per-source setting:<br/>summary_source"}
+        NO[Nostr events] --> Q
+    end
+
+    Q -->|agent| T
+    Q -->|digest feed| DG["Claude morning run:<br/>one summary per digest"]
+    DG --> T
+    Q -.->|karakeep| KB["Siftstr creates an archived Karakeep bookmark;<br/>Karakeep's AI summarizes it in the background"]
+    KB -.-> T
+    KQ --> T
+
+    T["Triage card: title and excerpt<br/>(a digest card is its summary)<br/>swipe or key, 15-minute undo hold"]
+
+    T -->|Delete| A["Mark read in Miniflux<br/>(and delete the Karakeep bookmark, if there is one)"]
+    T -->|Promote| P["Mark read in Miniflux;<br/>agent path: save to Karakeep, archived, tagged promoted"]
+    P -->|agent| PC["Claude morning run<br/>writes the summary and<br/>overwrites the bookmark's summary"]
+    P -.->|karakeep| PK["Karakeep's summary<br/>is already there"]
+    PC --> D["Card returns with the summary"]
+    PK -.-> D
+    D -->|Keep| K
+    D -->|Archive| AR["Bookmark stays in Karakeep,<br/>archived and tagged promoted"]
+    T -->|Keep| K["Mark read in Miniflux;<br/>Karakeep bookmark, MeTube download"]
+```
+
+- **Every triage action marks the entry read in Miniflux** (for feeds that come from Miniflux), so nothing you have sifted comes back as unread.
+- **Triage is on the title and excerpt**, for every feed. Digests are the exception: they have no single title to judge, so a digest card starts as Claude's summary.
+- **Promote brings the card back with a summary.** On `agent` feeds (the default) Claude writes it at the next morning run and it overwrites the bookmark's summary in Karakeep about 30 minutes after the bookmark is created. On `karakeep` feeds (dashed) Karakeep's own summary is shown, with no Claude run.
+- **`agent` feeds** stay out of Karakeep until you promote or keep. Digests must use this path, and so should Nostr, which has no page for Karakeep to crawl.
+- **Bookmarks Karakeep collects itself** are polled on a timer, so Karakeep's own RSS import can feed the same triage. They already have Karakeep's summary, so promote shows it with no Claude run. The `sifted` tag keeps Siftstr from offering back what it already sent.
+- **`karakeep` feeds** are saved to Karakeep at ingest, so use it only on feeds you are happy to have Karakeep crawl.
+- **Claude** writes digest summaries and the summary for promoted items on `agent` feeds. It does nothing else.
+
+The dashed `karakeep` path is designed in [ARCHITECTURE.md](ARCHITECTURE.md) (§5 to §7) but not built yet.
 
 ## What you need
 

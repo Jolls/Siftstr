@@ -4,7 +4,7 @@ Guidance for AI coding agents (and humans) working in this repository.
 
 ## Project
 
-**Siftstr** is a self-hosted daily triage gate. It pulls new items from Miniflux (RSS, YouTube channels, Reddit, podcasts, GitHub releases, newsletters) and Nostr. A single Claude scheduled task summarizes them each morning; everything else runs on Siftstr's own timers. The user then sifts each item on their phone or desktop: **archive**, **promote** (come back once with a deeper summary), or **keep** (send to Karakeep, MeTube, and so on). It is not a reader.
+**Siftstr** is a self-hosted daily triage gate. It pulls new items from Miniflux (RSS, YouTube channels, Reddit, podcasts, GitHub releases, newsletters) and Nostr. A single Claude scheduled task summarizes them each morning; everything else runs on Siftstr's own timers. The user then sifts each item on their phone or desktop: **delete**, **promote** (come back once with a summary), or **keep** (send to Karakeep, MeTube, and so on). It is not a reader.
 
 **Status:** pre-implementation. There is no code yet.
 
@@ -20,7 +20,7 @@ Don't break any of these without updating ARCHITECTURE.md and asking the user fi
 
 - **No LLM calls in the app.** Summaries come from Claude through the JSON API. Don't add model SDKs.
 - **Never download media.** No yt-dlp. Downloads are delegated to a destination such as MeTube.
-- **Source services are the system of record.** Siftstr stores only workflow state (queue, summaries, decisions, outbox, settings), and that state is deleted after 6 months.
+- **Source services are the system of record.** Siftstr stores only workflow state (queue, summaries, decisions, outbox, settings), and that state is deleted after 6 months. The one exception is a source set to use Karakeep summaries (`summary_source = karakeep`): its bookmarks are created in Karakeep at ingest, and Karakeep holds them from then on.
 - **All upstream side effects go through the outbox** and must be idempotent and retry-safe.
 - **One Claude run per day.** The morning scheduled task is the only LLM step. Ingest, write-back, carryover, briefing/export, and cleanup are Go code on in-app timers.
 - **SQLite is the source of truth.** The markdown briefing file and `/read` are renderings of it; never parse markdown back in.

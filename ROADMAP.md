@@ -37,6 +37,12 @@ The data model, auth, scoping, and per-user connections already support multiple
 
 ---
 
+## Experiment: Karakeep summaries
+
+A per-source `summary_source` setting (`agent` or `karakeep`) decides where a promoted item's summary comes from. Triage is on title and excerpt for every feed; digests start as a Claude summary. On `agent` feeds Claude writes the summary at the next morning run and it overwrites the Karakeep bookmark's summary after a delay. On `karakeep` feeds the bookmark is created at ingest and Karakeep's own AI summary is shown on promote, with no Claude run. The aim is to try both on real feeds and see which gives the better triage experience. The same experiment adds **Karakeep as a source**: Siftstr polls Karakeep for unarchived bookmarks (its own RSS import, or anything saved there by hand) and offers them for triage, skipping ones that are too old, already known, or tagged `sifted`. Design in ARCHITECTURE.md §6 and §7, with the open timing questions at Q23 to Q27. If `karakeep` wins for most feeds, the Claude path can shrink to the special cases, or give way to the local summarizer below.
+
+---
+
 ## Later
 
 - **MCP server or plugin** as an alternative to the scheduled-task API.
@@ -50,4 +56,3 @@ The data model, auth, scoping, and per-user connections already support multiple
 - **YouTube**: adding kept videos to a user-owned playlist (Watch Later is closed to the API; needs OAuth).
 - **Viewing past briefings in the app.** The markdown log covers this for now.
 - **Reversing a write-back** when undo happens after the hold has ended (e.g. delete the Karakeep bookmark).
-- **Karakeep as a source**, if a real use case turns up.
