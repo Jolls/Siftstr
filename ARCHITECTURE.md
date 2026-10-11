@@ -8,7 +8,7 @@ Status: **draft, pre-implementation.** Derived from the author's raw design note
 
 Siftstr is a self-hosted **triage gate** that sits in front of an existing reading/watching workflow. Each day it collects new items from feeds and lets the user sift them quickly, on the title and excerpt, with one of three outcomes. Summaries are not part of the first look: Claude summarizes digests (which have no single title to triage on) and the items the user promotes, and for sources that use Karakeep's own AI summary the promoted item shows that instead.
 
-- **Delete**: dismiss it. Its Karakeep bookmark, if it has one, is deleted; the Miniflux entry is only marked read, never deleted.
+- **Delete**: dismiss it. Its Karakeep bookmark, if it has one, is deleted; the Miniflux entry is only marked read, never deleted. A promoted item is never deleted: on its second look the same swipe **archives** it in Karakeep instead, and the bookmark stays.
 - **Promote**: bring it back once more with a summary.
 - **Keep**: send it on for full reading or watching later.
 
@@ -76,7 +76,7 @@ In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped
 6. **SQLite is the source of truth; markdown is a rendering.** The daily briefing file and the `/read` page come from the same data and template. Siftstr never parses markdown back in.
 7. **Swipes survive a dropped connection.** Every swipe or keypress goes into a small queue in the page and is sent right away. If the connection drops, actions keep queuing and are sent when it comes back. The UI never waits on the network to record an action.
 8. **Failures retry.** A failed summary waits for the next morning run. A failed write-back or upload retries on the next cycle. There is no elaborate error UI. Every write-back and every synced action must be idempotent.
-9. **Nothing vanishes on action.** An actioned item stays in place with a badge (deleted / promoted / kept), and focus moves to the next unsifted item. Undo is one action away.
+9. **Nothing vanishes on action.** An actioned item stays in place with a badge (deleted / archived / promoted / kept), and focus moves to the next unsifted item. Undo is one action away.
 10. **Undo lives on the server.** The server stores each action as soon as it arrives but holds its upstream effects for a grace period. Undo cancels the held effects. An action is lost only if it never reached the server.
 11. **No source-type special cases.** Reddit, Nostr, and podcasts are just sources. Behavior comes from per-source settings and the item's media type. Where a summary comes from is a per-source setting (`summary_source`), never a branch on what kind of source it is.
 12. **Built to be open-sourced.** Destinations are configurable and pluggable. Nothing personal (hosts, feeds, keys) goes in code or fixtures.
@@ -126,7 +126,7 @@ There is no service worker or installable app. The page must be loaded while onl
 | `light` | First-stage card, ready to triage: title and excerpt (a digest card shows its summary). Shown in Today, or in Backlog if carried over. |
 | `pending_deep` | Promoted; waiting for a summary: Claude's at the next morning run, or Karakeep's for a `karakeep` source |
 | `deep` | Summary ready (or given up on); shown again for a final decision |
-| `archived` | Terminal: the item was deleted. (The state keeps its original name internally; see Q28.) |
+| `archived` | Terminal: the item was deleted (from the first look) or archived in Karakeep (from the second look, after promote). One stored state for both; see Q28. |
 | `kept` | Terminal |
 | `expired` | Dropped by carryover rules (typically digest sources) |
 
@@ -145,7 +145,7 @@ There is no service worker or installable app. The page must be loaded while onl
 | `light` | promote (swipe right / `Right`) | `pending_deep` | Allowed **once** per item. The summary arrives the next morning (`agent`) or from Karakeep within minutes (`karakeep`). Disabled for sources with `max_depth = light` and for digests. |
 | `light` | keep (tap / `Space`) | `kept` | Skips the summary |
 | `light` | no action by next morning run | `light` (Backlog) or `expired` | Depends on the per-source `carryover` setting |
-| `deep` | delete | `archived` | |
+| `deep` | archive (swipe left / `Left`) | `archived` | The bookmark stays in Karakeep, already archived and tagged `promoted`. Nothing is deleted. |
 | `deep` | promote **or** keep | `kept` | At this stage promote and keep do the same thing |
 | `deep` | no action by next morning run | `deep` (Backlog) or `expired` | Same per-source `carryover` rule as light items; no new summary. Never auto-kept. |
 | any actioned | undo | previous state | Only while the server is still holding the action (grace period) |
@@ -175,7 +175,7 @@ Sources belong to a user. They are mirrored from that user's Miniflux feed list 
 
 `karakeep` has Karakeep's own AI summarize the item before the user has decided anything. At ingest, Siftstr creates the bookmark in Karakeep **archived**, so it stays out of the user's main list. The card is still triaged on title and excerpt; the summary is already there when the user promotes, with no Claude run:
 
-- **Delete** removes the bookmark (after the normal hold, so undo works inside the grace period; once sent, a delete is not reversed, as for every write-back).
+- **Delete** removes the bookmark (after the normal hold, so undo works inside the grace period; once sent, a delete is not reversed, as for every write-back). This is only for items that were never promoted; on a promoted card the same swipe leaves the bookmark archived.
 - **Keep** unarchives the bookmark and tags it `sifted` and `kept`.
 - **Promote** leaves it archived and tags it `sifted` and `promoted`. The poller reads Karakeep's summary back and the card returns with it.
 
@@ -242,6 +242,7 @@ Failures retry with exponential backoff (1 minute, doubling, capped at 6 hours) 
 | Outcome | Miniflux | Karakeep | Video and podcast destinations (multi-select) |
 |---|---|---|---|
 | delete | mark read | Delete the bookmark, for `karakeep` sources and Karakeep-sourced items. Nothing for `agent` items, which were never saved. | none |
+| archive (after promote) | already marked read | None: the bookmark stays archived, tagged `sifted` and `promoted`, with its summary | none |
 | promote | mark read, when the hold ends | `agent` source: create bookmark, **archived**, tagged `sifted` and `promoted`; Claude's summary then overwrites its summary field (delayed, see below). `karakeep` source: the bookmark already exists, so it only gets the tags, and Karakeep's own summary stands. | none |
 | keep: article / post | mark read | Create bookmark, not archived, tagged `sifted` and `kept` (a `karakeep` source's bookmark is unarchived and tagged instead) | n/a |
 | keep: video | mark read | If selected (default: yes): link and title (no file) | Selected destinations, e.g. MeTube download |
@@ -301,11 +302,11 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 ### Markdown briefing file
 
 - It is written once the morning summaries arrive.
-- It is rewritten with final outcomes (deleted / promoted / kept / carried over) at the next morning run, before the new day's file starts. The finished file is the durable log of that day.
+- It is rewritten with final outcomes (deleted / archived / promoted / kept / carried over) at the next morning run, before the new day's file starts. The finished file is the durable log of that day.
 - It is generated from the same data and template as `/read`, so the file matches what the user saw.
 - It lives at `/data/briefings/<username>/YYYY-MM-DD.md` (the day is the user's local date), written atomically so a sync client never sees half a file. A failed write is logged and never fails the run or the summary submission.
 - Layout: YAML frontmatter (`date`, `today`, `backlog`, `final`), then `## Today` and `## Backlog`, one `###` entry per item or digest (linked title, source and media type, outcome, summary). The summaries are Claude's markdown, inserted as is.
-- Outcomes: deleted, kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
+- Outcomes: deleted, archived, kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
 - Closing: `POST /api/v1/runs` runs carryover and then rewrites every earlier summarized day not yet closed with `final: true`. The last closed day is remembered in `user_settings` (`briefing_finalized_day`); the file is never read back.
 - `/read` renders the same Today and Backlog from the same query: headings and `<article>` only, with no buttons, forms or badges in the text flow.
 
@@ -419,10 +420,10 @@ An item's current outcome is derived from its latest effective action. The janit
 
 **Which cards a list shows.** "Today" is the user's local date (their timezone setting). `/today` shows every card ingested today (a digest: summarized today), actioned or not. `/backlog` shows cards from earlier days that are still `light` or `deep`, plus earlier cards actioned recently enough to still be undone, so an action never makes a card vanish under you. A digest is one card in place of its entries. Digests still waiting for their summary, and expired cards, appear nowhere.
 
-**Controls.** Swipe left or `Left` deletes. Swipe right or `Right` promotes (on a deep card it acts as keep, and on a card that cannot be promoted it does nothing). A tap on the card body (touch only) or `Space` keeps. `u` or `z` undoes, `j`/`k` or the up/down arrows move between cards, and a key action moves focus to the next card. Keys act only on a focused card, so links, buttons and form fields keep their own keys. A touch that starts on a link or button can swipe but never counts as a tap. The page updates the badge at once and queues the action; when the server answers, its state replaces the page's guess and a rejection shows its reason on the card.
+**Controls.** Swipe left or `Left` deletes (on a promoted card it archives: the Karakeep bookmark stays). Swipe right or `Right` promotes (on a deep card it acts as keep, and on a card that cannot be promoted it does nothing). A tap on the card body (touch only) or `Space` keeps. `u` or `z` undoes, `j`/`k` or the up/down arrows move between cards, and a key action moves focus to the next card. Keys act only on a focused card, so links, buttons and form fields keep their own keys. A touch that starts on a link or button can swipe but never counts as a tap. The page updates the badge at once and queues the action; when the server answers, its state replaces the page's guess and a rejection shows its reason on the card.
 
-- **Mobile:** a card stack. Swipe left deletes, swipe right promotes, tap keeps.
-- **Desktop:** a compact list. `Up`/`Down` move between items, `Left` deletes, `Right` promotes, `Space` keeps. *Proposed:* `u` undoes.
+- **Mobile:** a card stack. Swipe left deletes (archives, on a promoted card), swipe right promotes, tap keeps.
+- **Desktop:** a compact list. `Up`/`Down` move between items, `Left` deletes (archives, on a promoted card), `Right` promotes, `Space` keeps. *Proposed:* `u` undoes.
 - **All actions go through the page's action queue.** Gestures, keys, and buttons all enqueue the same action shape, and no action is a direct HTMX request. HTMX still renders pages and settings forms. The badge updates as soon as the action is queued, and a small indicator appears only while actions are waiting to be sent.
 - **Gestures:** a small pointer-events script detects swipes and enqueues the action. After each action, the client scrolls to the next unsifted item.
 - **Reading page:** the same swipe actions work when scrolling visually. Gesture affordances must stay out of the readable text flow so TTS doesn't read them aloud. Use semantic `<article>` markup.
@@ -559,7 +560,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 25. **Briefing contents.** Individual items have no summary until promoted, so the briefing and `/read` list titles and excerpts, plus summaries for digests and for promoted items that have one. *Proposed:* promoted items appear with their summary at the next rewrite (the closing pass), not live.
 26. **Which day an item belongs to.** Items now arrive and are triageable all day, rather than as one batch at the morning run. *Proposed:* an item's `batch_date` is the user's local date when it was ingested, and carryover at the morning run moves earlier days' untriaged items to Backlog or expires them as before.
 27. ~~**What delete does to a bookmark Siftstr did not create.**~~ **Decided (2026-10-11):** bookmarks the user saved by hand go through triage like any other, and Delete removes them too. There is no list or tag scoping. The swipe is labelled Delete, so it is clear what it does.
-28. **Internal names.** The outcome is called Delete in the UI and docs, but the stored action kind (`archive`), the item state (`archived`), the sync API and the CSS still use the old name, and the state values already exist in shipped databases. *Proposed:* keep the identifiers until there is a reason to migrate, and rename the label, buttons and badge only. Revisit if the mismatch confuses contributors, since a rename needs an append-only migration and a sync API change.
+28. **Internal names.** The outcome is called Delete in the UI and docs, but the stored action kind (`archive`), the item state (`archived`), the sync API and the CSS still use the old name for both swipe-left outcomes (delete on the first look, archive on the second; the write-back depends on the item's state when the action arrives), and the state values already exist in shipped databases. *Proposed:* keep the identifiers until there is a reason to migrate, and rename the label, buttons and badge only. Revisit if the mismatch confuses contributors, since a rename needs an append-only migration and a sync API change.
 
 ---
 
@@ -570,7 +571,7 @@ These are kept for context. The current design is above.
 | Earlier | Now |
 |---|---|
 | Checkbox triage with a submit button | Gestures and keys with three outcomes, queued per action |
-| Archive as the dismiss outcome | Delete: it removes the Karakeep bookmark where there is one, and "archived" was easily confused with the Karakeep archived flag that promote sets |
+| Archive as the dismiss outcome | Delete on the first look, since it removes the Karakeep bookmark where there is one; Archive only after promote, where it really is Karakeep's archive |
 | Four-level tap/swipe scale | Three outcomes (archive / promote / keep) |
 | Promote does no write-back | Promote saves to Karakeep (archived, tagged `sifted`, deep summary) |
 | Summary written to Karakeep with an `Agent Summary:` prefix, merged with Karakeep's own text | Delayed step that overwrites the summary; a feed can instead use Karakeep's own summary on promote (`summary_source`) |

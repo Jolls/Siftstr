@@ -2,7 +2,7 @@
 
 A self-hosted daily triage gate. Siftstr pulls new items from [Miniflux](https://miniflux.app) (RSS, YouTube channels, Reddit, podcasts, GitHub releases, newsletters) and from Nostr. You sift each item on your phone or desktop, on its title. A Claude scheduled task writes summaries each morning, but only for digests and for the items you promote.
 
-- **Delete**: you're done with it. Its Karakeep bookmark, if it has one, is deleted. The Miniflux entry is only marked read.
+- **Delete**: you're done with it. Its Karakeep bookmark, if it has one, is deleted. The Miniflux entry is only marked read. Once you have promoted an item it is never deleted: the same swipe archives it in Karakeep instead.
 - **Promote**: come back to it once, with a summary.
 - **Keep**: send it on to [Karakeep](https://karakeep.app), [MeTube](https://github.com/alexta69/metube) and so on.
 
@@ -36,7 +36,7 @@ flowchart TD
     PC --> D["Card returns with the summary"]
     PK -.-> D
     D -->|Keep| K
-    D -->|Delete| A
+    D -->|Archive| AR["Bookmark stays in Karakeep,<br/>archived and tagged promoted"]
     T -->|Keep| K["Mark read in Miniflux;<br/>Karakeep bookmark, MeTube download"]
 ```
 
