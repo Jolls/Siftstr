@@ -87,20 +87,24 @@ func TestDisabledUserCannotLogIn(t *testing.T) {
 	}
 }
 
-func TestRateLimitPerUserAndIP(t *testing.T) {
+func TestRateLimitPerPairAndIP(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newService(t)
 	_, _ = s.CreateUser(ctx, "alice", "password-one", RoleUser)
 
-	for i := 0; i < maxUserFailures; i++ {
+	for i := 0; i < maxPairFailures; i++ {
 		_, _ = s.Authenticate(ctx, "alice", "bad", "9.9.9.9")
 	}
-	// Even the right password is refused while blocked.
-	if _, err := s.Authenticate(ctx, "alice", "password-one", "2.2.2.2"); !errors.Is(err, ErrRateLimited) {
-		t.Fatalf("per-username limit: %v", err)
+	// Even the right password is refused from the blocked source...
+	if _, err := s.Authenticate(ctx, "alice", "password-one", "9.9.9.9"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("per-pair limit: %v", err)
+	}
+	// ...but not from another one.
+	if _, err := s.Authenticate(ctx, "alice", "password-one", "2.2.2.2"); err != nil {
+		t.Fatalf("other source: %v", err)
 	}
 	*clock = clock.Add(loginWindow + time.Second)
-	if _, err := s.Authenticate(ctx, "alice", "password-one", "2.2.2.2"); err != nil {
+	if _, err := s.Authenticate(ctx, "alice", "password-one", "9.9.9.9"); err != nil {
 		t.Fatalf("after window: %v", err)
 	}
 

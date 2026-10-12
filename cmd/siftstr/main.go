@@ -139,16 +139,12 @@ func serve() error {
 	rn := runs.New(st.DB())
 	rn.OnDeep = planner.OnDeep
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies,
 	})
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           h,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := newHTTPServer(cfg.Listen, h)
 	sched := scheduler.New(enabledUsers(st), nil)
 	mf := &miniflux.Ingester{DB: st.DB(), Conns: conns, New: miniflux.ClientFactory, Now: time.Now}
 	if err := sched.Register(scheduler.Job{
@@ -447,4 +443,18 @@ func readPassword(r io.Reader) (string, error) {
 		return "", errors.New("no password on stdin (pipe it in, e.g. printf '%s' \"$PW\" | siftstr user add alice)")
 	}
 	return strings.TrimRight(line, "\r\n"), nil
+}
+
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		// ReadTimeout covers the whole request, so it must leave room for an
+		// 8 MB summaries upload on a slow link. WriteTimeout must stay above
+		// the longest login delay (see auth.userDelayMax).
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 }

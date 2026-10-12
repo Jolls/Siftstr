@@ -33,6 +33,12 @@ type env struct {
 
 func setup(t *testing.T, ready func(context.Context) error, secure bool) *env {
 	t.Helper()
+	return setupDeps(t, ready, secure, nil)
+}
+
+// setupDeps is setup with a hook to change the server's Deps before it starts.
+func setupDeps(t *testing.T, ready func(context.Context) error, secure bool, mod func(*Deps)) *env {
+	t.Helper()
 	st, err := store.OpenFile(context.Background(), filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +56,11 @@ func setup(t *testing.T, ready func(context.Context) error, secure bool) *env {
 		t.Fatal(err)
 	}
 	briefDir := t.TempDir()
-	h, err := New(Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), briefDir), SecureCookies: secure})
+	d := Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), briefDir), SecureCookies: secure}
+	if mod != nil {
+		mod(&d)
+	}
+	h, err := New(d)
 	if err != nil {
 		t.Fatal(err)
 	}

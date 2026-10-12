@@ -80,7 +80,7 @@ To run the published image instead of building, swap `build: .` for `image: ghcr
 
 ```sh
 docker run -d --name siftstr --restart unless-stopped \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v siftstr-data:/data \
   -e SIFTSTR_BASE_URL=https://siftstr.example.com \
   -e SIFTSTR_ADMIN_USER=admin \
@@ -98,6 +98,7 @@ The admin variables only matter on the first start, when there are no users yet.
 | `SIFTSTR_LISTEN` | `:8080` | Listen address (plain HTTP). |
 | `SIFTSTR_DATA_DIR` | `/data` | Database, key, briefings and backups. |
 | `SIFTSTR_BASE_URL` | none | The URL browsers and the Claude task use to reach Siftstr. Drives absolute links and the `Secure` cookie flag. |
+| `SIFTSTR_TRUSTED_PROXIES` | none | Comma-separated CIDRs (or IPs) of your reverse proxy. Login limits then read the client IP from `X-Forwarded-For`. |
 | `SIFTSTR_SECRET_KEY` | generated | Key that encrypts saved upstream credentials. If unset, Siftstr creates `/data/secret.key`. |
 | `SIFTSTR_ADMIN_USER`, `SIFTSTR_ADMIN_PASSWORD` | none | Creates the first admin on first start. |
 | `TZ` | `UTC` | Default timezone for new users. Each user can change theirs under Settings, Sources. |
@@ -115,7 +116,10 @@ printf '%s' 'new-password' | docker compose exec -T siftstr /siftstr user set-pa
 
 The container never terminates TLS. Put Caddy, Traefik, nginx, Tailscale or similar in front of port 8080 and forward to it.
 
+`compose.yaml` publishes port 8080 on `127.0.0.1` only. Ports that Docker publishes bypass host firewalls such as ufw and firewalld, so an all-interfaces port would expose plain HTTP (password, session cookie, API key) even with a proxy in front. To reach Siftstr from other machines without a proxy, change the bind address on purpose.
+
 - Set `SIFTSTR_BASE_URL` to the address people actually use. The session cookie gets the `Secure` flag only when that URL starts with `https://`, and it is never inferred from the request, so behind a TLS proxy set it to your `https://` address.
+- Set `SIFTSTR_TRUSTED_PROXIES` to the address or subnet your proxy connects from, for example the Docker network's subnet such as `172.18.0.0/16`. Without it every login seems to come from the proxy, so 20 failed logins from anyone block logins for everyone for 15 minutes. List only addresses you control: a listed address can claim any client IP in `X-Forwarded-For`.
 - If you serve it over plain `http://` on a LAN, the cookie is not `Secure`. That works, but anyone on that network can read the traffic.
 
 The same URL is what the Claude task calls, so it has to be reachable from where the task runs. See [docs/scheduled-task.md](docs/scheduled-task.md).

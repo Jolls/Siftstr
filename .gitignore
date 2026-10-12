@@ -35,3 +35,5 @@ Thumbs.db
 /.claude-skills/
 /.claude/skills/
 compose.override.yaml
+
+/docs/plans/

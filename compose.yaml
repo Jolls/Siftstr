@@ -1,16 +1,23 @@
-# Example deployment for plain Docker. Put your reverse proxy (Caddy, Traefik,
-# nginx, ...) in front of port 8080; Siftstr itself only speaks plain HTTP.
+# Example deployment for plain Docker. Siftstr itself only speaks plain HTTP.
+# The port is published on 127.0.0.1 only, so the reverse proxy on this host
+# (Caddy, Traefik, nginx, ...) connects to 127.0.0.1:8080. Alternatively, put
+# the proxy on a shared Docker network and remove the `ports:` entry. To reach
+# Siftstr from other machines without a proxy, change the bind address on
+# purpose (for example "0.0.0.0:8080:8080").
 services:
   siftstr:
     build: .
     # image: ghcr.io/jolls/siftstr:latest   # published on release tags
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       # Public https:// URL that users reach Siftstr at. Drives the Secure
       # cookie flag and absolute links.
       SIFTSTR_BASE_URL: ${SIFTSTR_BASE_URL:-}
+      # Optional. CIDRs your reverse proxy connects from, so login limits see
+      # each client's IP (from X-Forwarded-For). Leave empty without a proxy.
+      SIFTSTR_TRUSTED_PROXIES: ${SIFTSTR_TRUSTED_PROXIES:-}
       # Created on first start only, when there are no users yet.
       SIFTSTR_ADMIN_USER: ${SIFTSTR_ADMIN_USER:-}
       SIFTSTR_ADMIN_PASSWORD: ${SIFTSTR_ADMIN_PASSWORD:-}
