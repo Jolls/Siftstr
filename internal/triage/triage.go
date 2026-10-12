@@ -134,6 +134,41 @@ func (s *Service) SetPhoneFlow(ctx context.Context, userID, flow string) error {
 	return err
 }
 
+// Colour theme (user_settings key "theme"). Auto, the default, follows the
+// device's light or dark setting; light and dark force one.
+const (
+	settingTheme = "theme"
+	ThemeAuto    = "auto"
+	ThemeLight   = "light"
+	ThemeDark    = "dark"
+)
+
+// ErrBadTheme is returned by SetTheme for a value that is not a theme.
+var ErrBadTheme = errors.New("theme must be auto, light or dark")
+
+// Theme returns the user's colour theme, ThemeAuto when none (or an unknown value) was saved.
+func (s *Service) Theme(ctx context.Context, userID string) (string, error) {
+	var v string
+	err := s.DB.QueryRowContext(ctx, `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`, userID, settingTheme).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && v != ThemeLight && v != ThemeDark) {
+		return ThemeAuto, nil
+	}
+	if err != nil {
+		return ThemeAuto, err
+	}
+	return v, nil
+}
+
+// SetTheme saves the user's colour theme.
+func (s *Service) SetTheme(ctx context.Context, userID, theme string) error {
+	if theme != ThemeAuto && theme != ThemeLight && theme != ThemeDark {
+		return ErrBadTheme
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
+		ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`, userID, settingTheme, theme)
+	return err
+}
+
 // Apply applies a batch for userID in client-timestamp order. Replaying a
 // batch is harmless: an action_id already stored returns its recorded outcome.
 // Results are in the same order as the input.

@@ -3,6 +3,7 @@ package ui
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -70,6 +71,17 @@ func TestItemBadgeAndControls(t *testing.T) {
 	}
 }
 
+// The color theme is named in exactly one place: the Pico stylesheet link.
+func TestBaseLinksStylesheets(t *testing.T) {
+	body := render(t, "items", Page{User: &User{}})
+	if !strings.Contains(body, `href="/static/app.css"`) {
+		t.Error("app.css link missing")
+	}
+	if n := strings.Count(body, `href="/static/pico.`); n != 1 {
+		t.Errorf("want exactly one Pico stylesheet link, got %d", n)
+	}
+}
+
 func TestEmptyList(t *testing.T) {
 	body := render(t, "items", Page{User: &User{}, Heading: "Backlog", Empty: "Nothing carried over."})
 	if !strings.Contains(body, "Nothing carried over.") {
@@ -82,7 +94,7 @@ func TestStatic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"/static/pico.min.css", "/static/app.css"} {
+	for _, p := range []string{"/static/pico.jade.min.css", "/static/app.css"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
 		if rec.Code != http.StatusOK {
@@ -258,6 +270,48 @@ func TestNoCollapseAnimation(t *testing.T) {
 	for _, motion := range []string{"transition", "animation"} {
 		if strings.Contains(css, motion) {
 			t.Errorf("app.css should not use %s", motion)
+		}
+	}
+}
+
+func TestBaseFollowsOSByDefault(t *testing.T) {
+	for name, p := range map[string]Page{
+		"login":            {Title: "Sign in"},
+		"items":            {User: &User{}, Heading: "Today"},
+		"read":             {User: &User{}},
+		"settings_sources": {User: &User{}, Title: "Sources"},
+	} {
+		body := render(t, name, p)
+		if !strings.Contains(body, `<meta name="color-scheme" content="light dark">`) || !strings.Contains(body, `<html lang="en">`) {
+			t.Errorf("%s: not following the OS", name)
+		}
+		if strings.Contains(body, "data-theme") {
+			t.Errorf("%s: has data-theme with no theme chosen", name)
+		}
+	}
+}
+
+func TestAppCSSUsesOnlyPicoColors(t *testing.T) {
+	if m := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(`).FindString(appCSS(t)); m != "" {
+		t.Errorf("app.css has a literal color %q", m)
+	}
+}
+
+func TestBaseRendersChosenTheme(t *testing.T) {
+	for theme, want := range map[string][2]string{
+		"dark":  {`<html lang="en" data-theme="dark">`, `<meta name="color-scheme" content="dark">`},
+		"light": {`<html lang="en" data-theme="light">`, `<meta name="color-scheme" content="light">`},
+		"auto":  {`<html lang="en">`, `<meta name="color-scheme" content="light dark">`},
+		"bogus": {`<html lang="en">`, `<meta name="color-scheme" content="light dark">`},
+	} {
+		body := render(t, "items", Page{User: &User{}, Heading: "Today", Theme: theme})
+		for _, w := range want {
+			if !strings.Contains(body, w) {
+				t.Errorf("theme %q: missing %q", theme, w)
+			}
+		}
+		if (theme == "auto" || theme == "bogus") && strings.Contains(body, "data-theme") {
+			t.Errorf("theme %q: should render no data-theme", theme)
 		}
 	}
 }

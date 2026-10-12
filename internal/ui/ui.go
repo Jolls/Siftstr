@@ -22,6 +22,9 @@ type Page struct {
 	// Problems is how many stopped upstream updates need attention; the base
 	// template shows an alert for it.
 	Problems int
+	// Theme is the signed-in user's colour theme: "auto", "light" or "dark".
+	// Empty (logged out) behaves as auto. base.html sets data-theme only for light or dark.
+	Theme string
 
 	// Item list pages (/today, /backlog).
 	Heading string

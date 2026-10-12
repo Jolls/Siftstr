@@ -408,6 +408,7 @@ runs           id, user_id, started_at, summaries_at, finished_at, stats
 
 -- settings
 user_settings      user_id, key, value   -- global prompt, video destinations,
+                                         -- phone_flow, theme (auto|light|dark),
                                          -- excerpt length, export path,
                                          -- karakeep_summary_delay_minutes,
                                          -- karakeep_summary_timeout_hours
@@ -444,7 +445,7 @@ An item's current outcome is derived from its latest effective action. The janit
 - **Gestures:** a small pointer-events script detects swipes and enqueues the action. After each action, the client scrolls to the next unsifted item (on mobile that is the card above, settling at the bottom of the screen). `j`/`k` always mean next and previous in sifting order; the arrows follow the screen.
 - **Reading page:** the same swipe actions work when scrolling visually. Gesture affordances must stay out of the readable text flow so TTS doesn't read them aloud. Use semantic `<article>` markup.
 - **Layout** switches with CSS media queries, not user-agent sniffing.
-- **Styling:** Pico.css, embedded in the binary. No CSS build step.
+- **Styling:** Pico.css (the jade color build, v2.1.1), embedded in the binary. No CSS build step. Light and dark come from Pico's own themes: by default the page follows the device (`prefers-color-scheme`). A per-user setting (`theme` in `user_settings`: `auto` by default, `light` or `dark`, on the Sources settings page) makes the server render `data-theme="light|dark"` on `<html>` (and the matching `color-scheme` meta) on every signed-in page; `auto` renders no attribute. There is no client script, so the wrong theme never flashes. The login page has no user, so it always follows the device. app.css uses only Pico color variables, so both themes apply to it.
 
 ---
 

@@ -305,3 +305,81 @@ func TestPhoneFlowSetting(t *testing.T) {
 		t.Fatal("alice's setting leaked to bob")
 	}
 }
+
+var themedPages = []string{"/today", "/backlog", "/read", "/settings/sources", "/settings/prompts",
+	"/settings/keys", "/settings/activity", "/settings/nostr", "/settings/destinations"}
+
+func TestPagesFollowOSWithNoThemeSaved(t *testing.T) {
+	e := setup(t, nil, false)
+	c, _ := e.signedIn(t, "alice")
+	for _, p := range themedPages {
+		if _, body := e.get(t, c, p); !strings.Contains(body, `content="light dark"`) || strings.Contains(body, "data-theme") {
+			t.Errorf("%s does not follow the OS", p)
+		}
+	}
+	if _, body := e.get(t, e.client(), "/login"); !strings.Contains(body, `content="light dark"`) || strings.Contains(body, "data-theme") {
+		t.Error("login does not follow the OS")
+	}
+}
+
+func TestThemeSetting(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	c2, _ := e.signedIn(t, "bob")
+	if _, body := e.get(t, c, "/settings/sources"); !strings.Contains(body, `name="theme" value="auto" checked`) {
+		t.Fatal("settings page does not show auto as chosen")
+	}
+	save := func(v url.Values) *http.Response { return e.post(t, c, "/settings/theme", v) }
+	if resp := save(url.Values{"theme": {"dark"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("no csrf = %d", resp.StatusCode)
+	}
+	resp := save(url.Values{"csrf": {csrf}, "theme": {"dark"}})
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/settings/sources?notice=saved" {
+		t.Fatalf("save = %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	for _, p := range themedPages {
+		if _, body := e.get(t, c, p); !strings.Contains(body, `<html lang="en" data-theme="dark">`) || !strings.Contains(body, `content="dark"`) {
+			t.Errorf("%s is not dark", p)
+		}
+	}
+	if _, body := e.get(t, c, "/settings/sources"); !strings.Contains(body, `name="theme" value="dark" checked`) {
+		t.Error("settings page does not show dark as chosen")
+	}
+	// Another user keeps the default, and so does the login page.
+	for _, p := range []string{"/today", "/settings/sources"} {
+		if _, body := e.get(t, c2, p); strings.Contains(body, "data-theme") {
+			t.Errorf("alice's theme leaked to bob on %s", p)
+		}
+	}
+	if _, body := e.get(t, e.client(), "/login"); strings.Contains(body, "data-theme") {
+		t.Error("login should follow the OS only")
+	}
+	// Bad values are rejected, and the 422 page still wears the saved theme.
+	for _, v := range []url.Values{{"csrf": {csrf}, "theme": {"sepia"}}, {"csrf": {csrf}}} {
+		resp := save(v)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("bad value %v = %d", v, resp.StatusCode)
+		}
+		if body := e.body(t, resp); !strings.Contains(body, "theme must be auto, light or dark.") || !strings.Contains(body, `data-theme="dark"`) {
+			t.Error("422 page lacks the message or lost the theme")
+		}
+	}
+	// It follows the user to a new session.
+	c3 := e.client()
+	if resp := e.login(t, c3, "alice", "correct horse battery"); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login = %d", resp.StatusCode)
+	}
+	if _, body := e.get(t, c3, "/today"); !strings.Contains(body, `data-theme="dark"`) {
+		t.Error("theme did not persist to a new session")
+	}
+	if resp := save(url.Values{"csrf": {csrf}, "theme": {"light"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save light = %d", resp.StatusCode)
+	}
+	if _, body := e.get(t, c, "/today"); !strings.Contains(body, `<html lang="en" data-theme="light">`) {
+		t.Error("light not applied")
+	}
+	save(url.Values{"csrf": {csrf}, "theme": {"auto"}})
+	if _, body := e.get(t, c, "/today"); strings.Contains(body, "data-theme") || !strings.Contains(body, `content="light dark"`) {
+		t.Error("auto did not clear the theme")
+	}
+}

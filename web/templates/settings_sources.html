@@ -29,6 +29,19 @@
     <button type="submit">Save</button>
   </form>
 </article>
+<article class="theme">
+  <form method="post" action="/settings/theme">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <fieldset>
+      <legend>Theme</legend>
+      <label><input type="radio" name="theme" value="auto"{{if and (ne .Theme "light") (ne .Theme "dark")}} checked{{end}}> Follow the device: light or dark, as your phone or computer is set</label>
+      <label><input type="radio" name="theme" value="light"{{if eq .Theme "light"}} checked{{end}}> Light</label>
+      <label><input type="radio" name="theme" value="dark"{{if eq .Theme "dark"}} checked{{end}}> Dark</label>
+    </fieldset>
+    <small>Applies on every device you sign in on. The sign-in page always follows the device.</small>
+    <button type="submit">Save</button>
+  </form>
+</article>
 <article class="ingest">
   <form method="post" action="/settings/ingest">
     <input type="hidden" name="csrf" value="{{.CSRF}}">

@@ -2,6 +2,7 @@ package triage
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -616,5 +617,42 @@ func TestCardSourceIsTheBylineWhenThereIsOne(t *testing.T) {
 	cards := f.cardIDs(t, "u1", ListToday)
 	if cards["plain"].Source != "Blog" || cards["named"].Source != "Armstrong Economics" {
 		t.Fatalf("sources: %q, %q", cards["plain"].Source, cards["named"].Source)
+	}
+}
+
+func TestThemeSetting(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	theme := func(u string) string {
+		t.Helper()
+		v, err := f.s.Theme(ctx, u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if theme("u1") != ThemeAuto {
+		t.Fatal("default is not auto")
+	}
+	if err := f.s.SetTheme(ctx, "u1", "dark"); err != nil {
+		t.Fatal(err)
+	}
+	if theme("u1") != "dark" {
+		t.Error("saved theme not returned")
+	}
+	if theme("u2") != ThemeAuto {
+		t.Error("u1's theme leaked to u2")
+	}
+	for _, bad := range []string{"sepia", ""} {
+		if err := f.s.SetTheme(ctx, "u1", bad); !errors.Is(err, ErrBadTheme) {
+			t.Errorf("SetTheme(%q) = %v, want ErrBadTheme", bad, err)
+		}
+	}
+	if theme("u1") != "dark" {
+		t.Error("a rejected value changed the saved theme")
+	}
+	f.exec(t, `INSERT INTO user_settings (user_id, key, value) VALUES ('u2', 'theme', 'neon')`)
+	if theme("u2") != ThemeAuto {
+		t.Error("unknown stored value should read as auto")
 	}
 }
