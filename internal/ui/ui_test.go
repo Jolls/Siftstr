@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Jolls/Siftstr/internal/briefing"
 )
 
 func render(t *testing.T, name string, p Page) string {
@@ -110,5 +112,152 @@ func TestItemExcerptAndDeleteLabel(t *testing.T) {
 	}
 	if strings.Contains(body, "hidden excerpt") {
 		t.Error("the excerpt should give way to the summary")
+	}
+}
+
+// A triaged card is collapsed by CSS, so everything it hides must still be in
+// the markup: the summary or excerpt, the badge and the buttons. Undo shows
+// whenever there is something to undo, and Promote hides itself outside "light".
+func TestActionedCardStaysInDOM(t *testing.T) {
+	body := render(t, "items", Page{
+		User: &User{Name: "a"}, Active: "today", Heading: "Today",
+		Items: []Item{
+			{ID: "itm_1", Title: "A", State: "archived", Badge: "archived", UndoID: "act_1", Excerpt: "excerpt one"},
+			{ID: "itm_2", Title: "B", State: "kept", Badge: "kept", UndoID: "act_2", Summary: "summary two"},
+			{ID: "itm_3", Title: "C", State: "pending_deep", Badge: "promoted", UndoID: "act_3", Excerpt: "excerpt three", CanPromote: true},
+		},
+	})
+	for _, want := range []string{
+		`<p class="excerpt">excerpt one</p>`, `<p class="summary">summary two</p>`, `<p class="excerpt">excerpt three</p>`,
+		`>archived</span>`, `>kept</span>`, `>promoted</span>`,
+		`data-undo-action="act_1"`, `data-undo-action="act_2"`, `data-undo-action="act_3"`,
+		`data-action="archive"`, `data-action="keep"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Count(body, `data-action="undo" hidden`) != 0 {
+		t.Error("Undo must not be hidden while there is an action to undo")
+	}
+	if !strings.Contains(body, `data-action="promote" hidden`) {
+		t.Error("Promote must be hidden outside the light state")
+	}
+}
+
+// /read is a linear text page: none of the card markup or its state belongs there.
+func TestReadPageHasNoCardMarkup(t *testing.T) {
+	body := render(t, "read", Page{
+		User: &User{Name: "a"}, Active: "read",
+		Today:   []briefing.Entry{{Title: "T", URL: "https://example.com/t", Source: "S", Excerpt: "x", Summary: "y"}},
+		Backlog: []briefing.Entry{{Title: "B", Source: "S", Excerpt: "z"}},
+	})
+	for _, bad := range []string{`data-state`, `data-action`, `data-badge`, `class="item"`} {
+		if strings.Contains(body, bad) {
+			t.Errorf("/read must not contain %q", bad)
+		}
+	}
+	if !strings.Contains(body, `class="read-entry"`) {
+		t.Error("/read entries missing")
+	}
+}
+
+func appCSS(t *testing.T) string {
+	t.Helper()
+	h, err := Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/app.css", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("app.css = %d", rec.Code)
+	}
+	return rec.Body.String()
+}
+
+// cssBlock returns the declarations of the first rule whose selector list
+// contains sel, or "" when there is none.
+func cssBlock(css, sel string) string {
+	i := strings.Index(css, sel)
+	if i < 0 {
+		return ""
+	}
+	open := strings.Index(css[i:], "{")
+	if open < 0 {
+		return ""
+	}
+	rest := css[i+open+1:]
+	if end := strings.Index(rest, "}"); end >= 0 {
+		return rest[:end]
+	}
+	return ""
+}
+
+var triagedStates = []string{"archived", "kept", "pending_deep"}
+
+func TestCollapseHidesSummaryAndExcerpt(t *testing.T) {
+	css := appCSS(t)
+	for _, s := range triagedStates {
+		for _, part := range []string{".summary", ".excerpt"} {
+			sel := `.item[data-state="` + s + `"] ` + part
+			if !strings.Contains(cssBlock(css, sel), "display: none") {
+				t.Errorf("%s should be display: none", sel)
+			}
+		}
+		if !strings.Contains(cssBlock(css, `.item[data-state="`+s+`"]`), "opacity: 0.6") && !strings.Contains(css, "opacity: 0.6") {
+			t.Errorf("triaged cards should stay dimmed (%s)", s)
+		}
+	}
+}
+
+func TestActionedHidesAllButUndo(t *testing.T) {
+	css := appCSS(t)
+	for _, s := range triagedStates {
+		sel := `.item[data-state="` + s + `"] [data-action]:not([data-action="undo"])`
+		if !strings.Contains(cssBlock(css, sel), "display: none") {
+			t.Errorf("%s should be display: none", sel)
+		}
+		// Undo's visibility is the hidden attribute's job; a display rule would override it.
+		if strings.Contains(cssBlock(css, `.item[data-state="`+s+`"] [data-action="undo"]`), "display") {
+			t.Errorf("Undo must not get a display rule in %s", s)
+		}
+	}
+}
+
+func TestPerStateChosenButtonRulesRemoved(t *testing.T) {
+	css := appCSS(t)
+	for _, gone := range []string{
+		"only the chosen button stays",
+		"justify-content: flex-start",
+		"justify-content: flex-end",
+		`[data-state="pending_deep"] [data-action="promote"] { display: inline-block`,
+		`[data-state="pending_deep"] [data-action="undo"] { order: -1`,
+	} {
+		if strings.Contains(css, gone) {
+			t.Errorf("app.css still has %q", gone)
+		}
+	}
+}
+
+func TestControlsBadgeLeftUndoRight(t *testing.T) {
+	css := appCSS(t)
+	for _, s := range triagedStates {
+		if !strings.Contains(cssBlock(css, `.item[data-state="`+s+`"] .controls`), "justify-content: space-between") {
+			t.Errorf("%s controls should be space-between", s)
+		}
+		if !strings.Contains(cssBlock(css, `.item[data-state="`+s+`"] [data-action="undo"]`), "margin-inline-start: auto") {
+			t.Errorf("%s Undo should sit at the end of the row", s)
+		}
+	}
+}
+
+// Collapsing is instant: no motion for the viewer to opt out of.
+func TestNoCollapseAnimation(t *testing.T) {
+	css := appCSS(t)
+	for _, motion := range []string{"transition", "animation"} {
+		if strings.Contains(css, motion) {
+			t.Errorf("app.css should not use %s", motion)
+		}
 	}
 }

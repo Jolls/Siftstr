@@ -17,6 +17,8 @@
   the action queue shows it as soon as an action is queued. Actioned items are
   never removed. Controls sit in <footer>, outside the readable text flow,
   and enqueue actions through the page queue (never a direct request).
+  An actioned card is collapsed by CSS from data-state: the summary or excerpt,
+  buttons and badge all stay in the DOM.
 */}}
 {{define "item"}}
 <article class="item" id="{{.ID}}" data-item-id="{{.ID}}" data-subject-type="{{if .Kind}}{{.Kind}}{{else}}item{{end}}" data-state="{{.State}}" data-promoted="{{.Promoted}}" data-media-type="{{.MediaType}}" data-can-promote="{{.CanPromote}}" data-undo-action="{{.UndoID}}" tabindex="0">

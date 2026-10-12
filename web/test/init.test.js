@@ -65,3 +65,41 @@ test("a promoted card that is archived reads archived, and a key undoes it", () 
   assert.equal(p.card.dataset.state, "deep");
   assert.equal(p.parts['[data-action="undo"]'].hidden, true);
 });
+
+function press(p, key) {
+  p.docHandlers.keydown({ key, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+}
+
+function tap(p, action) {
+  p.handlers.click({ target: { closest: () => ({ dataset: { action }, closest: () => p.card }) } });
+}
+
+test("a triaged card ignores further buttons and keys until it is undone", () => {
+  for (const state of ["archived", "kept", "pending_deep"]) {
+    const p = page();
+    p.card.dataset.state = state;
+    p.card.dataset.undoAction = "act_0";
+    for (const action of ["archive", "keep", "promote"]) tap(p, action);
+    for (const key of ["ArrowLeft", "ArrowRight", " "]) press(p, key);
+    assert.equal(p.queued.length, 0, state);
+    assert.equal(p.card.dataset.state, state);
+    assert.equal(p.card.dataset.undoAction, "act_0");
+  }
+});
+
+test("undo puts the card, and its Promote button, back as they were", () => {
+  const p = page();
+  tap(p, "archive");
+  assert.equal(p.card.dataset.state, "archived");
+  tap(p, "undo");
+  assert.equal(p.card.dataset.state, "light");
+  assert.equal(p.parts['[data-action="promote"]'].hidden, false);
+  assert.equal(p.parts['[data-action="undo"]'].hidden, true);
+
+  tap(p, "promote");
+  assert.equal(p.card.dataset.state, "pending_deep");
+  assert.equal(p.parts['[data-action="promote"]'].hidden, true);
+  tap(p, "undo");
+  assert.equal(p.card.dataset.state, "light");
+  assert.equal(p.parts['[data-action="promote"]'].hidden, false);
+});

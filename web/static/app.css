@@ -20,19 +20,17 @@
 .item .label-archive, .item[data-promoted="true"] .label-delete, .item[data-state="deep"] .label-delete { display: none; }
 .item[data-promoted="true"] .label-archive, .item[data-state="deep"] .label-archive { display: inline; }
 
-/* Once actioned, only the chosen button stays, pushed to its side, with Undo beside it. */
-.item[data-state="archived"] .controls { justify-content: flex-start; }
-.item[data-state="kept"] .controls { justify-content: center; }
-.item[data-state="pending_deep"] .controls { justify-content: flex-end; }
-.item[data-state="archived"] [data-action="keep"],
-.item[data-state="archived"] [data-action="promote"],
-.item[data-state="kept"] [data-action="archive"],
-.item[data-state="kept"] [data-action="promote"],
-.item[data-state="pending_deep"] [data-action="archive"],
-.item[data-state="pending_deep"] [data-action="keep"] { display: none; }
-/* Promote sits right, so its Undo goes on its left. The script hides Promote outside "light"; keep it visible here. */
-.item[data-state="pending_deep"] [data-action="promote"] { display: inline-block; }
-.item[data-state="pending_deep"] [data-action="undo"] { order: -1; }
+/* A triaged card (archived, kept, pending_deep) collapses to its title, source, badge and Undo.
+   Driven by data-state, so the page queue, the server's reconciled state and a reload all
+   collapse it the same way. Undo's visibility is the hidden attribute's job: never set display on it. */
+.item[data-state="archived"] .summary, .item[data-state="kept"] .summary, .item[data-state="pending_deep"] .summary,
+.item[data-state="archived"] .excerpt, .item[data-state="kept"] .excerpt, .item[data-state="pending_deep"] .excerpt,
+.item[data-state="archived"] [data-action]:not([data-action="undo"]),
+.item[data-state="kept"] [data-action]:not([data-action="undo"]),
+.item[data-state="pending_deep"] [data-action]:not([data-action="undo"]) { display: none; }
+/* Badge on the left, Undo on the right. */
+.item[data-state="archived"] .controls, .item[data-state="kept"] .controls, .item[data-state="pending_deep"] .controls { justify-content: space-between; }
+.item[data-state="archived"] [data-action="undo"], .item[data-state="kept"] [data-action="undo"], .item[data-state="pending_deep"] [data-action="undo"] { margin-inline-start: auto; }
 
 .badge {
   padding: 0.1rem 0.6rem;
