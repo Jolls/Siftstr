@@ -38,9 +38,9 @@
   q.start(window);
 
   // Logging out would leave unsent actions waiting for the next login.
-  var logout = document.querySelector("form[data-logout]");
-  if (logout) {
-    logout.addEventListener("submit", function (e) {
+  var logouts = document.querySelectorAll("form[data-logout]");
+  for (var i = 0; i < logouts.length; i++) {
+    logouts[i].addEventListener("submit", function (e) {
       var n = q.pending().length;
       if (n > 0 && !window.confirm(actions(n) + (n === 1 ? " has" : " have") + " not been sent yet. Sign out anyway?")) {
         e.preventDefault();

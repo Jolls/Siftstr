@@ -114,6 +114,10 @@ func serve() error {
 	}
 	defer st.Close()
 
+	if w := baseURLWarning(cfg); w != "" {
+		log.Print(w)
+	}
+
 	created, err := a.Bootstrap(ctx, cfg.AdminUser, cfg.AdminPassword)
 	if err != nil {
 		return err
@@ -457,4 +461,12 @@ func newHTTPServer(addr string, h http.Handler) *http.Server {
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+}
+
+// baseURLWarning returns the startup warning for a BASE_URL that is not https, or "".
+func baseURLWarning(cfg config.Config) string {
+	if cfg.SecureCookies() {
+		return ""
+	}
+	return "SIFTSTR_BASE_URL is not https: cookies are not Secure; expose this instance only on a trusted network or behind a TLS proxy"
 }

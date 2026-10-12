@@ -219,3 +219,156 @@ func TestNewUsersGetTheConfiguredDefaultTimezone(t *testing.T) {
 		t.Fatalf("typo replaced the default: %s", u.Timezone)
 	}
 }
+
+func TestUserForSessionUpdatesLastSeen(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newService(t)
+	u, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	token, _, _ := s.NewSession(ctx, u.ID)
+	*clock = clock.Add(time.Hour)
+	if _, err := s.UserForSession(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	_ = s.db.QueryRowContext(ctx, `SELECT last_seen_at FROM sessions WHERE user_id = ?`, u.ID).Scan(&got)
+	if want := clock.UTC().Format(time.RFC3339); got != want {
+		t.Fatalf("last_seen_at = %q, want %q", got, want)
+	}
+}
+
+// A phone used once a day is never cut off, but the absolute limit still holds.
+func TestDailyUseKeepsSessionAlive(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newService(t)
+	u, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	token, _, _ := s.NewSession(ctx, u.ID)
+	start := *clock
+	for d := 1; d <= 29; d++ {
+		*clock = start.Add(time.Duration(d) * 24 * time.Hour)
+		if _, err := s.UserForSession(ctx, token); err != nil {
+			t.Fatalf("day %d: %v", d, err)
+		}
+	}
+	*clock = start.Add(SessionLifetime)
+	if _, err := s.UserForSession(ctx, token); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("at absolute expiry: %v", err)
+	}
+}
+
+func TestSetPasswordEndsOnlyThatUsersSessions(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newService(t)
+	alice, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	bob, _ := s.CreateUser(ctx, "bob", "password-two", RoleUser)
+	at, _, _ := s.NewSession(ctx, alice.ID)
+	bt, _, _ := s.NewSession(ctx, bob.ID)
+	if err := s.SetPassword(ctx, "alice", "password-new"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UserForSession(ctx, at); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("alice: %v", err)
+	}
+	if got, err := s.UserForSession(ctx, bt); err != nil || got.ID != bob.ID {
+		t.Fatalf("bob: %v", err)
+	}
+}
+
+func TestSessionIdleTimeout(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newService(t)
+	u, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	start := *clock
+	token, _, _ := s.NewSession(ctx, u.ID)
+	*clock = start.Add(SessionIdleTimeout + time.Second)
+	if _, err := s.UserForSession(ctx, token); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("idle: %v", err)
+	}
+}
+
+func TestSessionIdleBoundary(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newService(t)
+	u, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	start := *clock
+	token, _, _ := s.NewSession(ctx, u.ID)
+	*clock = start.Add(SessionIdleTimeout - time.Second)
+	if _, err := s.UserForSession(ctx, token); err != nil {
+		t.Fatalf("just before: %v", err)
+	}
+	_, _ = s.db.ExecContext(ctx, `UPDATE sessions SET last_seen_at = ? WHERE user_id = ?`, start.Format(time.RFC3339), u.ID)
+	*clock = start.Add(SessionIdleTimeout)
+	if _, err := s.UserForSession(ctx, token); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("at boundary: %v", err)
+	}
+}
+
+func TestIdleTimeoutSlides(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newService(t)
+	u, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	start := *clock
+	token, _, _ := s.NewSession(ctx, u.ID)
+	*clock = start.Add(SessionIdleTimeout - time.Hour)
+	if _, err := s.UserForSession(ctx, token); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	*clock = start.Add(2*SessionIdleTimeout - 2*time.Hour)
+	if _, err := s.UserForSession(ctx, token); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	*clock = clock.Add(SessionIdleTimeout)
+	if _, err := s.UserForSession(ctx, token); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("after idle: %v", err)
+	}
+}
+
+func TestEndAllSessionsIsScopedToUser(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newService(t)
+	alice, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	bob, _ := s.CreateUser(ctx, "bob", "password-two", RoleUser)
+	a1, _, _ := s.NewSession(ctx, alice.ID)
+	a2, _, _ := s.NewSession(ctx, alice.ID)
+	bt, _, _ := s.NewSession(ctx, bob.ID)
+	n, err := s.EndAllSessions(ctx, alice.ID)
+	if err != nil || n != 2 {
+		t.Fatalf("EndAllSessions = %d, %v", n, err)
+	}
+	for _, tok := range []string{a1, a2} {
+		if _, err := s.UserForSession(ctx, tok); !errors.Is(err, ErrNoSession) {
+			t.Errorf("alice session survived: %v", err)
+		}
+	}
+	if got, err := s.UserForSession(ctx, bt); err != nil || got.ID != bob.ID {
+		t.Fatalf("bob: %v", err)
+	}
+	if _, err := s.EndAllSessions(ctx, ""); err == nil {
+		t.Error("empty user ID should error")
+	}
+	var c int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id = ?`, bob.ID).Scan(&c)
+	if c != 1 {
+		t.Fatalf("bob sessions = %d", c)
+	}
+}
+
+func TestListSessionsScopedAndFiltered(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newService(t)
+	alice, _ := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	bob, _ := s.CreateUser(ctx, "bob", "password-two", RoleUser)
+	start := *clock
+	_, _, _ = s.NewSession(ctx, alice.ID) // a1: idle by the time we list
+	_, _, _ = s.NewSession(ctx, bob.ID)
+	*clock = start.Add(8 * 24 * time.Hour)
+	a2, _, _ := s.NewSession(ctx, alice.ID)
+	*clock = clock.Add(time.Hour)
+	got, err := s.ListSessions(ctx, alice.ID, a2)
+	if err != nil || len(got) != 1 || !got[0].Current || !got[0].LastSeenAt.Equal(start.Add(8*24*time.Hour)) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, _ = s.ListSessions(ctx, alice.ID, "other")
+	if len(got) != 1 || got[0].Current {
+		t.Fatalf("other token: %+v", got)
+	}
+}
