@@ -1,11 +1,11 @@
 {{define "base"}}<!doctype html>
-<html lang="en">
+<html lang="en"{{if or (eq .Theme "light") (eq .Theme "dark")}} data-theme="{{.Theme}}"{{end}}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="{{if eq .Theme "light"}}light{{else if eq .Theme "dark"}}dark{{else}}light dark{{end}}">
   <title>{{if .Title}}{{.Title}} · {{end}}Siftstr</title>
-  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/pico.jade.min.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body{{if .User}} data-user-id="{{.User.ID}}" data-csrf="{{.CSRF}}"{{end}}>

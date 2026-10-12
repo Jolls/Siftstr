@@ -332,6 +332,18 @@ func (s *server) displaySave(w http.ResponseWriter, req *http.Request, sess *ses
 	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
 }
 
+func (s *server) themeSave(w http.ResponseWriter, req *http.Request, sess *session) {
+	if err := s.Triage.SetTheme(req.Context(), sess.User.ID, req.PostFormValue("theme")); err != nil {
+		if errors.Is(err, triage.ErrBadTheme) {
+			s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
+			return
+		}
+		serverError(w)
+		return
+	}
+	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+}
+
 func (s *server) activityForm(w http.ResponseWriter, req *http.Request, sess *session) {
 	rows, err := s.Outbox.Recent(req.Context(), sess.User.ID, 100)
 	if err != nil {

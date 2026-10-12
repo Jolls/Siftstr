@@ -80,4 +80,4 @@ form.inline button { margin: 0; width: auto; padding: 0.25rem 0.75rem; }
 
 /* Alert for upstream updates that stopped. */
 .alert { padding: .5rem 0; }
-.alert a { color: var(--pico-del-color, #c62828); font-weight: 600; }
+.alert a { color: var(--pico-del-color); font-weight: 600; }
