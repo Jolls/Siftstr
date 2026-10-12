@@ -56,6 +56,7 @@ internal/store/         SQLite access and embedded migrations
 web/static/             Pico.css, app.css, later htmx, gestures.js, queue.js (action queue + sender)
 web/templates/          html/template files (base, login, items); embedded via web/embed.go
 docs/                   API.md and other specs
+scripts/                CI and dev helper scripts (check-changelog.sh)
 Dockerfile              multi-stage, static binary, distroless/scratch runtime
 compose.yaml            example deployment for plain Docker
 ```
@@ -70,6 +71,7 @@ go test ./...
 go vet ./...
 gofmt -l .            # must print nothing
 node --test web/test/*.test.js   # client queue and gesture tests; dev-only, also run by `go test ./web` when node is installed
+scripts/check-changelog.sh <base-ref> <head-ref>   # dry run of the PR changelog check
 docker build -t siftstr .
 docker buildx build --platform linux/amd64,linux/arm64 -t siftstr .   # release builds
 
@@ -98,12 +100,13 @@ docker compose logs -f
 **Docs**
 - When you change behavior that ARCHITECTURE.md describes, update ARCHITECTURE.md in the same change.
 - Don't silently resolve an item in ARCHITECTURE.md's open questions. Ask the user, then record the decision.
+- At release, rename `## [Unreleased]` in `CHANGELOG.md` to `## [x.y.z] - YYYY-MM-DD` and add a fresh empty `## [Unreleased]` above it.
 
 ## Working agreements
 
 - **Memory stays in this repo, locally.** Any memory an agent keeps about this project goes in `.agent-memory/` at the repo root. It is git-ignored: never commit it, and don't store project memory anywhere else. Memory is for short-term notes. Anything lasting belongs in its proper project file (ARCHITECTURE.md, ROADMAP.md, this file, docs/), so promote it there and delete it from memory. An empty memory folder is the goal.
 - **No automatic commits.** Leave changes uncommitted so the user can review the file diffs. Commit only when the user says to, for example "commit when done". That counts as approval for that request only, not for later work. The same goes for pushing.
-
+- **Keep the changelog.** Any change that affects behavior gets a one-line entry under `## [Unreleased]` in `CHANGELOG.md` (Added, Changed, Fixed, Removed, or Security), written in the same change. "Affects behavior" is defined by the path rule in `scripts/check-changelog.sh`: non-test files under `cmd/` (except `cmd/seed/`), `internal/`, and `web/` (except `web/test/`), plus `Dockerfile`, `compose.yaml`, and `.env.example`. Docs, tests, CI, dev tooling, and `go.mod`/`go.sum` need no entry. A PR that touches a covered path without editing `CHANGELOG.md` fails the `changelog` check unless it has the `skip-changelog` label (for refactors and other internal-only changes). This doesn't change "No automatic commits".
 - **No live runs without explicit approval.** Default to the seeded dev instance (`docs/development.md`) with fakes. Only run Siftstr against real upstreams (Miniflux, Karakeep, MeTube, Nostr relays) or with locally stored API keys when the user explicitly asks for that run. If it isn't explicit, ask for confirmation first, every time. Earlier approval doesn't carry over to later runs.
 
 ## Issue triage
