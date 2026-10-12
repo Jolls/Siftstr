@@ -455,11 +455,12 @@ An item's current outcome is derived from its latest effective action. The janit
 
 - **Username and password** on a login form, which creates a server-side session. The session cookie is `HttpOnly`, `Secure`, and `SameSite=Lax`. This is simple login rather than HTTP Basic auth: Basic auth has no logout, sends the password on every request, and handles multiple users poorly.
 - Passwords are stored with argon2id.
-- Failed logins are rate-limited per username and per IP.
+- Failed logins are limited per (username, client IP) pair: 5 failures in 15 minutes block that pair, so failures from one source cannot lock a user out everywhere. 20 failures in 15 minutes from one client IP block that IP; an IPv6 client counts as its /64. Failures for one username from every source slow its logins down instead of blocking them: from the 10th failure in 15 minutes each attempt waits 1 second, doubling per further failure up to 30 seconds. Each attempt counts before its password is checked, so concurrent attempts cannot slip past a limit, and a successful login clears its pair's count. Usernames are at most 64 bytes. Each counter holds at most 10,000 entries and drops expired ones every minute.
+- At most two password checks run at once (each argon2id check takes 64 MiB). A login that finds both busy gets `429` at once instead of waiting, and is not counted as a failure.
 - CSRF protection applies to state-changing HTML routes and `/sync/actions`.
 - **Long sessions *(proposed)*.** Make sessions long-lived so a session expiring mid-triage is rare. Queued actions survive an expired session either way.
 - **Bootstrap:** on first start with an empty `users` table, Siftstr creates an admin user from `SIFTSTR_ADMIN_USER` and `SIFTSTR_ADMIN_PASSWORD`. The `siftstr user add` and `siftstr user set-password` CLI commands can also create users and reset passwords, which also gives platform wrappers (such as the StartOS package) a way to set the admin password. v1 has no other user management.
-- **Behind a TLS proxy.** Inside the container every request arrives as plain HTTP, so the `Secure` cookie flag and any absolute URLs come from config (`SIFTSTR_BASE_URL`), not from `r.TLS`. Don't reject requests based on the `Host` header.
+- **Behind a TLS proxy.** Inside the container every request arrives as plain HTTP, so the `Secure` cookie flag and any absolute URLs come from config (`SIFTSTR_BASE_URL`), not from `r.TLS`. Don't reject requests based on the `Host` header. The client IP for login limits is the connecting address unless that address is inside `SIFTSTR_TRUSTED_PROXIES`; then it is read from `X-Forwarded-For`, right to left, skipping trusted hops.
 
 ### API keys
 
@@ -475,6 +476,11 @@ An item's current outcome is derived from its latest effective action. The janit
 - **Background jobs are scoped too.** Ingest, release, and export run per user, with that user's connections. One user's failing upstream must not block another user's jobs.
 - **The client queue is per user.** The `localStorage` queue is keyed by user ID and only sent under a matching session. Logging out with unsent actions shows a warning.
 - **Markdown export paths are per user**, e.g. a path template that includes the username.
+
+### Request limits and timeouts
+
+- HTML form POSTs are size-limited before parsing: `POST /login` 16 KB; `POST /logout` and `POST /settings/*` 1 MB. Over the limit gets `413`. `/sync/actions` is limited to 1 MB and `/api/*` summaries to 8 MB, each in its own handler.
+- The HTTP server sets `ReadHeaderTimeout` 10s, `ReadTimeout` 60s (covers the 8 MB summaries upload), `WriteTimeout` 60s, `IdleTimeout` 120s.
 
 ### Exposure
 The Claude scheduled task has to reach the instance over the network. That affects how it gets exposed (LAN only, VPN such as Tailscale, Tor, or a public domain). See open questions.
@@ -528,6 +534,7 @@ Everything that must survive a restart lives under `/data`, so a single named vo
 | `SIFTSTR_LISTEN` | `:8080` | Listen address |
 | `SIFTSTR_DATA_DIR` | `/data` | Database, key, and default export location |
 | `SIFTSTR_BASE_URL` | none | URL the Claude task and browsers use to reach Siftstr: a local `http://host:port`, an IP, or a public `https://` domain. Used for absolute links; `Secure` cookies only when it is `https://` |
+| `SIFTSTR_TRUSTED_PROXIES` | none | Comma-separated CIDRs (or single IPs) of reverse proxies. Only a request that connects from one of them has its client IP taken from `X-Forwarded-For`, read from the right and skipping trusted hops; otherwise the connecting address is the client IP. Used by the login limits |
 | `SIFTSTR_SECRET_KEY` | auto-generated file | Encryption key for `connections` secrets |
 | `SIFTSTR_ADMIN_USER` / `SIFTSTR_ADMIN_PASSWORD` | none | Bootstrap admin on first start |
 | `TZ` | `UTC` | Default timezone for new users |
@@ -539,7 +546,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 - SQLite runs in WAL mode, and copying the database file while Siftstr is writing can produce a broken copy. Siftstr writes a consistent snapshot once a day with `VACUUM INTO /data/backups/siftstr-YYYY-MM-DD.db` and keeps the newest 7 (Q22), so file-level backup tools (restic, borg, Nextcloud sync, StartOS) can copy `/data/backups/` without stopping the container. Snapshots hold the encrypted connection secrets but not `secret.key`, so a restore needs the key from the original `/data/secret.key` or `SIFTSTR_SECRET_KEY`.
 
 **What the repo ships**
-- A `Dockerfile` and an example `compose.yaml`: a named volume on `/data`, port 8080, and the bootstrap env vars, intended to sit behind the operator's existing reverse proxy.
+- A `Dockerfile` and an example `compose.yaml`: a named volume on `/data`, port 8080 published on `127.0.0.1` only, and the bootstrap env vars, intended to sit behind the operator's existing reverse proxy.
 - A README deployment guide written for someone who doesn't run StartOS.
 
 **What a platform wrapper needs** (StartOS or anything else; no wrapper code lives in this repo)

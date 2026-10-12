@@ -23,18 +23,38 @@ const (
 
 	minPasswordLen = 8
 
-	loginWindow     = 15 * time.Minute
-	maxUserFailures = 5
+	loginWindow = 15 * time.Minute
+	// maxPairFailures blocks one (username, client IP) pair, so failures from
+	// one source cannot lock a user out everywhere.
+	maxPairFailures = 5
 	maxIPFailures   = 20
+
+	// Failures for one username from every source slow its logins down
+	// instead of blocking them: from userDelayAfter failures in the window each
+	// attempt waits userDelayBase, doubling per further failure up to
+	// userDelayMax, which it reaches at userDelayKeep failures.
+	userDelayAfter = 10
+	userDelayBase  = time.Second
+	userDelayMax   = 30 * time.Second
+	userDelayKeep  = 15
+
+	// maxUsernameLen caps usernames in bytes, at creation and before a login
+	// name is used as a limiter key.
+	maxUsernameLen = 64
+
+	// maxConcurrentHashes caps password checks running at once. Each argon2id
+	// check takes 64 MiB, so this bounds login memory.
+	maxConcurrentHashes = 2
 )
 
 var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
-	ErrRateLimited        = errors.New("too many failed logins; try again later")
+	ErrRateLimited        = errors.New("too many login attempts; try again later")
 	ErrNoSession          = errors.New("no valid session")
 	ErrUserExists         = errors.New("user already exists")
 	ErrUnknownUser        = errors.New("unknown user")
 	ErrWeakPassword       = fmt.Errorf("password must be at least %d characters", minPasswordLen)
+	ErrUsernameTooLong    = fmt.Errorf("username must be at most %d bytes", maxUsernameLen)
 )
 
 // Roles.
@@ -56,10 +76,14 @@ type Service struct {
 	db        *sql.DB
 	csrfKey   []byte
 	now       func() time.Time
-	byUser    *limiter
-	byIP      *limiter
-	dummyHash string // verified against for unknown users, to even out timing
-	defaultTZ string // timezone given to new users
+	byPair    *limiter                                     // failures per (username, client IP key); blocks at maxPairFailures
+	byIP      *limiter                                     // failures per client IP key (IPv6 by /64); blocks at maxIPFailures
+	byUser    *limiter                                     // failures per username from every source; drives userDelay
+	sleep     func(context.Context, time.Duration) error   // sleepCtx; replaced in tests
+	verify    func(password, encoded string) (bool, error) // VerifyPassword; replaced in tests
+	hashSlots chan struct{}                                // one token per running password check
+	dummyHash string                                       // verified against for unknown users, to even out timing
+	defaultTZ string                                       // timezone given to new users
 }
 
 // New returns a Service. csrfKey signs CSRF tokens (see secret.Derive).
@@ -72,8 +96,12 @@ func New(db *sql.DB, csrfKey []byte) (*Service, error) {
 		db:        db,
 		csrfKey:   csrfKey,
 		now:       time.Now,
-		byUser:    newLimiter(loginWindow, maxUserFailures),
+		byPair:    newLimiter(loginWindow, maxPairFailures),
 		byIP:      newLimiter(loginWindow, maxIPFailures),
+		byUser:    newLimiter(loginWindow, userDelayKeep),
+		sleep:     sleepCtx,
+		verify:    VerifyPassword,
+		hashSlots: make(chan struct{}, maxConcurrentHashes),
 		dummyHash: dummy,
 		defaultTZ: "UTC",
 	}, nil
@@ -92,6 +120,45 @@ func (s *Service) SetDefaultTimezone(name string) {
 }
 
 func normalize(username string) string { return strings.ToLower(strings.TrimSpace(username)) }
+
+// loginName normalizes a submitted username and caps it at maxUsernameLen
+// bytes. tooLong means no user can have this name. At most 4*maxUsernameLen
+// bytes are lowercased, so a huge field costs nothing.
+func loginName(raw string) (name string, tooLong bool) {
+	raw = strings.TrimSpace(raw)
+	if len(raw) > 4*maxUsernameLen {
+		raw = raw[:4*maxUsernameLen]
+	}
+	name = strings.ToLower(raw)
+	if len(name) > maxUsernameLen {
+		return name[:maxUsernameLen], true
+	}
+	return name, false
+}
+
+// userDelay is how long a login waits after n recent failures for its
+// username from every source.
+func userDelay(n int) time.Duration {
+	if n < userDelayAfter {
+		return 0
+	}
+	if n >= userDelayKeep {
+		return userDelayMax
+	}
+	return userDelayBase << (n - userDelayAfter)
+}
+
+// sleepCtx waits for d or until ctx ends.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
 
 func randomToken(n int) (string, error) {
 	b := make([]byte, n)
@@ -113,6 +180,9 @@ func (s *Service) CreateUser(ctx context.Context, username, password, role strin
 	username = normalize(username)
 	if username == "" {
 		return User{}, errors.New("username is required")
+	}
+	if len(username) > maxUsernameLen {
+		return User{}, ErrUsernameTooLong
 	}
 	if role != RoleAdmin && role != RoleUser {
 		return User{}, fmt.Errorf("unknown role %q", role)
@@ -191,38 +261,72 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (boo
 	return true, nil
 }
 
-// Authenticate checks a login. Failures are counted per username and per IP.
-// The error is the same for unknown users, wrong passwords and disabled
-// accounts.
+// Authenticate checks a login. Failures are counted per (username, client
+// IP) pair and per client IP, where an IPv6 client counts as its /64; either
+// limit refuses the attempt with ErrRateLimited. Failures for a username from
+// every source never refuse it: they delay each attempt (userDelay), before a
+// hash slot is taken, so no one can lock a user out. At most
+// maxConcurrentHashes checks run at once; when all are busy the attempt fails
+// at once with ErrRateLimited and is not counted. Each attempt counts before
+// its password is checked. The error is the same for unknown users, wrong
+// passwords and disabled accounts.
 func (s *Service) Authenticate(ctx context.Context, username, password, ip string) (User, error) {
-	username = normalize(username)
+	username, tooLong := loginName(username)
+	ipk := ipKey(ip)
+	pair := username + "\x00" + ipk
 	now := s.now()
-	if s.byUser.blocked(username, now) || s.byIP.blocked(ip, now) {
+	if s.byPair.blocked(pair, now) || s.byIP.blocked(ipk, now) {
 		return User{}, ErrRateLimited
 	}
+	if d := userDelay(s.byUser.count(username, now)); d > 0 {
+		if err := s.sleep(ctx, d); err != nil {
+			return User{}, err
+		}
+	}
+	select {
+	case s.hashSlots <- struct{}{}:
+		defer func() { <-s.hashSlots }()
+	default:
+		return User{}, ErrRateLimited
+	}
+	now = s.now()
+	if !s.byPair.reserve(pair, now) {
+		return User{}, ErrRateLimited
+	}
+	if !s.byIP.reserve(ipk, now) {
+		s.byPair.release(pair, now)
+		return User{}, ErrRateLimited
+	}
+	s.byUser.record(username, now)
 
 	var (
 		u        User
 		hash     string
 		disabled bool
+		known    bool
 	)
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, username, role, timezone, password_hash, disabled FROM users WHERE username = ?`, username).
-		Scan(&u.ID, &u.Username, &u.Role, &u.Timezone, &hash, &disabled)
-	known := err == nil
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return User{}, err
+	if !tooLong {
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id, username, role, timezone, password_hash, disabled FROM users WHERE username = ?`, username).
+			Scan(&u.ID, &u.Username, &u.Role, &u.Timezone, &hash, &disabled)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			s.byPair.release(pair, now)
+			s.byIP.release(ipk, now)
+			s.byUser.release(username, now)
+			return User{}, err
+		}
+		known = err == nil
 	}
 	if !known {
 		hash = s.dummyHash
 	}
-	ok, verr := VerifyPassword(password, hash)
+	ok, verr := s.verify(password, hash)
 	if verr != nil || !ok || !known || disabled {
-		s.byUser.fail(username, now)
-		s.byIP.fail(ip, now)
-		return User{}, ErrInvalidCredentials
+		return User{}, ErrInvalidCredentials // the reservations stand as the failures
 	}
-	s.byUser.reset(username)
+	s.byPair.reset(pair)
+	s.byIP.release(ipk, now)
+	s.byUser.release(username, now)
 	return u, nil
 }
 

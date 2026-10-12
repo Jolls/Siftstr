@@ -15,6 +15,8 @@ The task is an HTTP client: it calls `POST <BASE_URL>/api/v1/runs` from wherever
 | Reverse proxy with TLS on a public name | `https://siftstr.example.com` | the task runs somewhere that cannot join your network, such as Claude's cloud |
 | Tunnel (Cloudflare Tunnel, a reverse tunnel) | `https://siftstr.example.com` | you don't want to open a port, but the task needs to reach in from outside |
 
+The LAN and VPN rows need the published port reachable from other machines. The default `compose.yaml` binds it to `127.0.0.1` only, so change the bind address on purpose (for example `"0.0.0.0:8080:8080"`) or put a proxy in front.
+
 If the task's host can't resolve or route to the address, the run fails at step 1 with a connection error. `GET <BASE_URL>/api/v1/ping` with the key is a quick way to check from that host. Anything public should be HTTPS: the API key is a bearer token.
 
 ### 2. Create an API key

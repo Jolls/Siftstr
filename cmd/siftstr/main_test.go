@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadPassword(t *testing.T) {
@@ -104,5 +105,12 @@ func TestAPIKeyCLI(t *testing.T) {
 	}
 	if err := apikeyCmd([]string{"create", "ghost"}, &out); err == nil {
 		t.Error("unknown user accepted")
+	}
+}
+
+func TestNewHTTPServerTimeouts(t *testing.T) {
+	srv := newHTTPServer(":0", http.NewServeMux())
+	if srv.ReadHeaderTimeout != 10*time.Second || srv.ReadTimeout != 60*time.Second || srv.WriteTimeout != 60*time.Second || srv.IdleTimeout != 120*time.Second {
+		t.Fatalf("timeouts = header %v read %v write %v idle %v", srv.ReadHeaderTimeout, srv.ReadTimeout, srv.WriteTimeout, srv.IdleTimeout)
 	}
 }

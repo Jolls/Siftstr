@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -23,6 +24,11 @@ import (
 	"github.com/Jolls/Siftstr/internal/triage"
 	"github.com/Jolls/Siftstr/internal/ui"
 	"github.com/Jolls/Siftstr/internal/writeback"
+)
+
+const (
+	maxLoginBody = 16 << 10 // POST /login
+	maxFormBody  = 1 << 20  // POST /settings/* and POST /logout
 )
 
 const (
@@ -49,6 +55,10 @@ type Deps struct {
 	// SecureCookies sets the Secure flag. It comes from SIFTSTR_BASE_URL, not
 	// from r.TLS, because TLS ends at the reverse proxy.
 	SecureCookies bool
+	// TrustedProxies comes from SIFTSTR_TRUSTED_PROXIES. Only a request whose
+	// peer address is inside one of them has its client IP read from
+	// X-Forwarded-For.
+	TrustedProxies []netip.Prefix
 }
 
 type server struct {
@@ -118,7 +128,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("POST /settings/destinations/keep", s.protected(s.keepSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}/delete", s.protected(s.destinationDelete))
-	return secureHeaders(mux), nil
+	return secureHeaders(limitForms(mux)), nil
 }
 
 func (s *server) healthz(w http.ResponseWriter, req *http.Request) {
@@ -314,7 +324,7 @@ func (s *server) login(w http.ResponseWriter, req *http.Request) {
 		s.renderLogin(w, http.StatusForbidden, "Your login form expired. Please try again.")
 		return
 	}
-	u, err := s.Auth.Authenticate(req.Context(), req.PostFormValue("username"), req.PostFormValue("password"), clientIP(req))
+	u, err := s.Auth.Authenticate(req.Context(), req.PostFormValue("username"), req.PostFormValue("password"), clientIP(req, s.TrustedProxies))
 	switch {
 	case errors.Is(err, auth.ErrRateLimited):
 		s.renderLogin(w, http.StatusTooManyRequests, err.Error())
@@ -322,6 +332,8 @@ func (s *server) login(w http.ResponseWriter, req *http.Request) {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		s.renderLogin(w, http.StatusUnauthorized, err.Error())
 		return
+	case errors.Is(err, context.Canceled):
+		return // the client went away while its login was delayed
 	case err != nil:
 		serverError(w)
 		return
@@ -356,14 +368,91 @@ func (s *server) clearCookie(w http.ResponseWriter, name string) {
 	})
 }
 
-// clientIP is the peer address. Behind a reverse proxy this is the proxy's
-// address, so the per-IP login limit then applies to all clients together.
-func clientIP(req *http.Request) string {
+// clientIP is the address a login attempt counts against. It is the peer
+// address unless the peer is a trusted proxy. Then X-Forwarded-For is read
+// from the right, skipping trusted hops, and the first untrusted address is
+// the client. An entry that does not parse stops the walk at the nearest
+// trusted hop; if every hop is trusted the leftmost one is used. Entries left
+// of the client are never read, so a spoofed prefix costs nothing.
+func clientIP(req *http.Request, trusted []netip.Prefix) string {
 	host, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil {
-		return req.RemoteAddr
+		host = req.RemoteAddr
 	}
-	return host
+	if len(trusted) == 0 {
+		return host
+	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil || !isTrusted(peer, trusted) {
+		return host
+	}
+	client := peer.WithZone("").Unmap()
+	hops := strings.Split(strings.Join(req.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop := strings.TrimSpace(hops[i])
+		if hop == "" {
+			continue
+		}
+		a, err := netip.ParseAddr(hop)
+		if err != nil {
+			// Some proxies write the client's port too.
+			ap, perr := netip.ParseAddrPort(hop)
+			if perr != nil {
+				return client.String()
+			}
+			a = ap.Addr()
+		}
+		client = a.WithZone("").Unmap()
+		if !isTrusted(client, trusted) {
+			break
+		}
+	}
+	return client.String()
+}
+
+func isTrusted(a netip.Addr, trusted []netip.Prefix) bool {
+	a = a.WithZone("").Unmap()
+	for _, p := range trusted {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// limitForms caps the body of HTML form POSTs and parses it, so an oversized
+// body is refused with 413 before any handler or the CSRF check sees it.
+// /sync/actions and /api/ have their own limits and are passed through.
+func limitForms(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var limit int64
+		switch {
+		case req.Method != http.MethodPost:
+		case req.URL.Path == "/login":
+			limit = maxLoginBody
+		case req.URL.Path == "/logout" || strings.HasPrefix(req.URL.Path, "/settings/"):
+			limit = maxFormBody
+		}
+		if limit > 0 {
+			req.Body = http.MaxBytesReader(w, req.Body, limit)
+			// Parsing caches the form on req, so later PostFormValue calls do
+			// not read the body again. The body is capped at limit, so no
+			// multipart part can spill to a temporary file.
+			// ParseMultipartForm drops ParseForm's error for a body that is not
+			// multipart, so check the URL-encoded parse on its own first.
+			err := req.ParseForm()
+			if err == nil {
+				err = req.ParseMultipartForm(limit)
+			}
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				w.Header().Set("Connection", "close")
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 // secureHeaders sets headers that suit a plain-HTTP app behind a TLS proxy.

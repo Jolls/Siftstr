@@ -2,7 +2,7 @@
 
 Run an isolated Siftstr with sample data and no upstream connections. With no connections saved, ingest has nothing to fetch and write-back is skipped (released actions are still recorded), so nothing can touch a real Miniflux, Karakeep or MeTube. The start-up log says so: `no upstream connections: nothing will be ingested or written back`.
 
-`compose.dev.yaml` uses its own project name (`siftstr-dev`), port `8081` and a bind-mounted `./.local/dev-data` (git-ignored). It shares nothing with a real instance. Note that Compose also merges a `compose.override.yaml` automatically when you use plain `docker compose`; with `-f compose.dev.yaml` it does not.
+`compose.dev.yaml` uses its own project name (`siftstr-dev`), port `8081` (bound to `127.0.0.1`) and a bind-mounted `./.local/dev-data` (git-ignored). It shares nothing with a real instance. Note that Compose also merges a `compose.override.yaml` automatically when you use plain `docker compose`; with `-f compose.dev.yaml` it does not.
 
 ## Start
 
