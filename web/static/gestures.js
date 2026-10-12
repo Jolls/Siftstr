@@ -61,6 +61,21 @@
     return null;
   }
 
+  // On a phone the list is drawn upside down (app.css), so the first card to
+  // sift sits at the bottom, under the thumb, and each next card comes down
+  // from above. The DOM keeps the sifting order; only what you see is reversed.
+  var PHONE = "(max-width: 767px)";
+
+  // step is how far a navigation key moves through the cards, in sifting order
+  // (+1 is the next card to sift). j and k always mean next and previous; the
+  // arrows follow the screen, so on a reversed list Down goes back a card.
+  function step(key, reversed) {
+    if (key === "j") return 1;
+    if (key === "k") return -1;
+    var down = key === "ArrowDown";
+    return down !== !!reversed ? 1 : -1;
+  }
+
   var KEYS = { ArrowLeft: "archive", ArrowRight: "promote", " ": "keep", u: "undo", z: "undo" };
 
   // card is the in-page record of one article: what act() and the server
@@ -98,6 +113,10 @@
     var history = []; // cards acted on this page load, oldest first
     function canUndo(el) { return (el.dataset.undoAction || "") !== ""; }
 
+    var phone = win.matchMedia ? win.matchMedia(PHONE) : null;
+    // The user can turn the bottom-up layout off (data-flow="down").
+    function reversed() { return !!(phone && phone.matches && list.dataset && list.dataset.flow !== "down"); }
+
     function cards() { return Array.prototype.slice.call(list.querySelectorAll("article.item")); }
 
     function render(el) {
@@ -112,6 +131,15 @@
       if (promote) promote.hidden = c.state !== "light";
     }
 
+    // The pinned bar says how many cards are left, so the ones scrolled out of
+    // view above are not a surprise. It is hidden unless the list is bottom-up.
+    var more = doc.querySelector("[data-more]");
+    function updateMore() {
+      if (!more) return;
+      var left = cards().filter(function (el) { return el.dataset.state === "light" || el.dataset.state === "deep"; }).length;
+      more.textContent = left ? left + " to sift \u2191" : "All sifted";
+    }
+
     function set(el, v) {
       el.dataset.state = v.state;
       el.dataset.undoAction = v.undoID;
@@ -119,6 +147,7 @@
       var notice = el.querySelector("[data-notice]");
       if (notice) { notice.textContent = v.notice || ""; notice.hidden = !v.notice; }
       render(el);
+      updateMore();
     }
 
     // act records one action on a card and shows its effect immediately.
@@ -153,7 +182,8 @@
     function focusCard(el) {
       if (!el) return;
       el.focus();
-      if (el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+      // Reversed, the next card comes down and settles at the bottom, by the thumb.
+      if (el.scrollIntoView) el.scrollIntoView({ block: reversed() ? "end" : "nearest", behavior: "smooth" });
     }
     doc.addEventListener("keydown", function (e) {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -161,8 +191,7 @@
       var cur = doc.activeElement && doc.activeElement.matches && doc.activeElement.matches("article.item") ? doc.activeElement : null;
       if (e.key === "j" || e.key === "ArrowDown" || e.key === "k" || e.key === "ArrowUp") {
         if (!cur && doc.activeElement !== doc.body) return; // let controls keep their keys
-        var step = e.key === "j" || e.key === "ArrowDown" ? 1 : -1;
-        var i = cur ? all.indexOf(cur) + step : 0;
+        var i = cur ? all.indexOf(cur) + step(e.key, reversed()) : 0;
         if (all[i]) { e.preventDefault(); focusCard(all[i]); }
         return;
       }
@@ -209,7 +238,21 @@
     });
 
     cards().forEach(render);
+    updateMore();
+
+    // Start at the first card still to sift, which on a phone is at the bottom.
+    // The browser may restore or reset the scroll position after this script
+    // runs, so turn restoring off and land again once the page has loaded.
+    if (reversed()) {
+      var land = function () {
+        var first = cards().filter(function (el) { return el.dataset.state === "light" || el.dataset.state === "deep"; })[0];
+        if (first && first.scrollIntoView) first.scrollIntoView({ block: "end" });
+      };
+      if (win.history && "scrollRestoration" in win.history) win.history.scrollRestoration = "manual";
+      land();
+      if (win.addEventListener) win.addEventListener("load", land);
+    }
   }
 
-  return { badge: badge, next: next, swipe: swipe, undoTarget: undoTarget, reconcile: reconcile, init: init, KEYS: KEYS };
+  return { badge: badge, next: next, swipe: swipe, undoTarget: undoTarget, step: step, reconcile: reconcile, init: init, KEYS: KEYS };
 });

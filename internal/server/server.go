@@ -101,6 +101,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /settings/prompts", s.protected(s.promptsForm))
 	mux.HandleFunc("POST /settings/prompts", s.protected(s.promptsSave))
 	mux.HandleFunc("POST /settings/timezone", s.protected(s.timezoneSave))
+	mux.HandleFunc("POST /settings/display", s.protected(s.displaySave))
 	mux.HandleFunc("GET /settings/keys", s.protected(s.keysForm))
 	mux.HandleFunc("POST /settings/keys", s.protected(s.keyCreate))
 	mux.HandleFunc("POST /settings/keys/{id}/revoke", s.protected(s.keyRevoke))
@@ -255,6 +256,10 @@ func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter
 		}
 		p := s.page(sess, list, heading)
 		p.Heading, p.Empty = heading, empty
+		if p.PhoneFlow, err = s.Triage.PhoneFlow(ctx, sess.User.ID); err != nil {
+			serverError(w)
+			return
+		}
 		for _, c := range cards {
 			p.Items = append(p.Items, ui.Item{
 				ID: c.ID, Title: c.Title, URL: c.URL, Source: c.Source, MediaType: c.MediaType,

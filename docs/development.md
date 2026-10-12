@@ -11,24 +11,26 @@ docker compose -f compose.dev.yaml up -d --build
 docker compose -f compose.dev.yaml logs -f
 ```
 
-Open <http://localhost:8081> and log in as `dev` with `dev-password-change-me` (override with `SIFTSTR_ADMIN_USER` and `SIFTSTR_ADMIN_PASSWORD` before the first start). Never add real connections to this instance.
+Open <http://localhost:8081> and log in as `admin` with `admin123` (fixed in `compose.dev.yaml`; this instance is throwaway, so the password is deliberately weak). Never add real connections to this instance.
 
 ## Seed
 
 The seed tool is not in the released image, so run it on the host (needs Go) against the bind-mounted data directory:
 
 ```sh
-go run ./cmd/seed load -data ./.local/dev-data -user dev -file cmd/seed/example.json
+go run ./cmd/seed load -data ./.local/dev-data -user admin -file cmd/seed/example.json
 ```
 
-Loading the same file again changes nothing. The items are pending, so they appear after a run (next section).
+Loading the same file again changes nothing. The items come with summaries and are dated today, so they show on Today straight away; no run is needed.
+
+**Stop the container while you seed** (`docker compose -f compose.dev.yaml stop`, then `start` again). SQLite's write-ahead log does not work across the Docker Desktop bind mount on Windows and macOS, so a seed written from the host while the container is running is invisible to the app: every list stays empty.
 
 ### Short undo hold
 
 The default undo hold is 15 minutes. To see release and outbox behavior sooner, pass `-hold`:
 
 ```sh
-go run ./cmd/seed load -data ./.local/dev-data -user dev -file cmd/seed/example.json -hold 1
+go run ./cmd/seed load -data ./.local/dev-data -user admin -file cmd/seed/example.json -hold 1
 ```
 
 ## Simulate the morning run

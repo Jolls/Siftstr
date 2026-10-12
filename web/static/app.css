@@ -4,6 +4,8 @@
 .login { max-width: 24rem; margin-inline: auto; }
 
 .items { display: grid; gap: 1rem; }
+.listbar { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.listbar .more { display: none; white-space: nowrap; color: var(--pico-muted-color); }
 .item { margin: 0; touch-action: pan-y; } /* vertical scroll is the browser's; horizontal swipes are ours */
 .item h2 { font-size: 1.15rem; margin-bottom: 0.25rem; }
 .item hgroup p { font-size: 0.85rem; }
@@ -42,10 +44,20 @@
 .item[data-state="kept"],
 .item[data-state="pending_deep"] { opacity: 0.6; }
 
-/* Mobile: one card at a time, scroll-snapped. */
+/* Mobile: one card at a time, scroll-snapped. By default (data-flow="up") the
+   list is drawn upside down (the DOM keeps the sifting order) so the card to sift is at the bottom, under
+   the thumb, and the next one comes down from above. */
 @media (max-width: 767px) {
   .items { scroll-snap-type: y proximity; }
   .item { scroll-snap-align: start; }
+  .items[data-flow="up"] { display: flex; flex-direction: column-reverse; }
+  .items[data-flow="up"] .item { scroll-snap-align: end; }
+  /* Bottom-up: the heading stays pinned at the top, with how many are left and a
+     fade under it, so it is clear that more cards wait above the one in view. */
+  .listbar[data-flow="up"] { position: sticky; top: 0; z-index: 2; padding: 0.4rem 0; background: var(--pico-background-color); }
+  .listbar[data-flow="up"] h1 { margin: 0; font-size: 1.4rem; }
+  .listbar[data-flow="up"]::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 1.5rem; pointer-events: none; background: linear-gradient(var(--pico-background-color), transparent); }
+  .listbar[data-flow="up"] .more { display: inline; }
 }
 
 /* Desktop: compact list. */

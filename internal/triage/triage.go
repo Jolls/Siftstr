@@ -103,6 +103,37 @@ func holdFor(ctx context.Context, tx *sql.Tx, userID string) time.Duration {
 	return DefaultHold
 }
 
+// Phone list direction (user_settings key "phone_flow"). Up is the default:
+// on a phone the list is drawn bottom-up, so the card to sift is under the thumb.
+const (
+	settingPhoneFlow = "phone_flow"
+	FlowUp           = "up"
+	FlowDown         = "down"
+)
+
+// ErrBadFlow is returned by SetPhoneFlow for a value that is not a direction.
+var ErrBadFlow = errors.New("flow must be up or down")
+
+// PhoneFlow returns the user's phone list direction, FlowUp when none was saved.
+func (s *Service) PhoneFlow(ctx context.Context, userID string) (string, error) {
+	var v string
+	err := s.DB.QueryRowContext(ctx, `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`, userID, settingPhoneFlow).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && v != FlowDown) {
+		return FlowUp, nil
+	}
+	return v, err
+}
+
+// SetPhoneFlow saves the user's phone list direction.
+func (s *Service) SetPhoneFlow(ctx context.Context, userID, flow string) error {
+	if flow != FlowUp && flow != FlowDown {
+		return ErrBadFlow
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
+		ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`, userID, settingPhoneFlow, flow)
+	return err
+}
+
 // Apply applies a batch for userID in client-timestamp order. Replaying a
 // batch is harmless: an action_id already stored returns its recorded outcome.
 // Results are in the same order as the input.

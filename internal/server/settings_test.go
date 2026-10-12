@@ -273,3 +273,35 @@ func TestSummarySourceAndKarakeepSettingsSave(t *testing.T) {
 		t.Fatalf("bad timeout = %d", resp.StatusCode)
 	}
 }
+
+func TestPhoneFlowSetting(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	c2, _ := e.signedIn(t, "bob")
+	// The list only renders when it has a card; an earlier-day light card is in the backlog.
+	for _, n := range []string{"alice", "bob"} {
+		e.seedLight(t, n, "itm_"+n)
+		e.exec(t, `UPDATE items SET batch_date = '2000-01-01', light_summary = 's' WHERE id = ?`, "itm_"+n)
+	}
+	_, body := e.get(t, c, "/backlog")
+	if !strings.Contains(body, `data-flow="up"`) {
+		t.Fatal("default is not bottom-up")
+	}
+	_, body = e.get(t, c, "/settings/sources")
+	if !strings.Contains(body, `value="up" checked`) {
+		t.Fatal("settings page does not show bottom-up as chosen")
+	}
+	if resp := e.post(t, c, "/settings/display", url.Values{"csrf": {csrf}, "phone_flow": {"down"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	if _, body = e.get(t, c, "/backlog"); !strings.Contains(body, `data-flow="down"`) {
+		t.Fatal("saved direction not used on the list")
+	}
+	if resp := e.post(t, c, "/settings/display", url.Values{"csrf": {csrf}, "phone_flow": {"sideways"}}); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("bad value = %d", resp.StatusCode)
+	}
+	// Another user keeps the default.
+	if _, body = e.get(t, c2, "/backlog"); !strings.Contains(body, `data-flow="up"`) {
+		t.Fatal("alice's setting leaked to bob")
+	}
+}

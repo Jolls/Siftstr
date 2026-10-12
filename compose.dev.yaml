@@ -10,8 +10,8 @@ services:
     ports:
       - "8081:8080"
     environment:
-      SIFTSTR_ADMIN_USER: ${SIFTSTR_ADMIN_USER:-dev}
-      SIFTSTR_ADMIN_PASSWORD: ${SIFTSTR_ADMIN_PASSWORD:-dev-password-change-me}
+      SIFTSTR_ADMIN_USER: admin
+      SIFTSTR_ADMIN_PASSWORD: admin123
       # Plain http on localhost: no BASE_URL, so cookies are not Secure.
       TZ: ${TZ:-UTC}
     volumes:

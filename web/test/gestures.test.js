@@ -88,3 +88,15 @@ test("both swipe-left outcomes are stored as archived; the badge tells them apar
   assert.equal(badge("pending_deep", false), "promoted");
   for (const s of ["light", "deep", "expired", "pending_light"]) assert.equal(badge(s, true), "");
 });
+
+test("step: j and k mean next and previous; the arrows follow the screen", () => {
+  const { step } = require("../static/gestures.js");
+  assert.equal(step("j", false), 1);
+  assert.equal(step("j", true), 1);
+  assert.equal(step("k", true), -1);
+  assert.equal(step("ArrowDown", false), 1);
+  assert.equal(step("ArrowUp", false), -1);
+  // reversed (phone): the next card to sift is above, so Down goes back a card
+  assert.equal(step("ArrowDown", true), -1);
+  assert.equal(step("ArrowUp", true), 1);
+});

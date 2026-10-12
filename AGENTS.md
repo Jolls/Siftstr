@@ -104,6 +104,8 @@ docker compose logs -f
 - **Memory stays in this repo, locally.** Any memory an agent keeps about this project goes in `.agent-memory/` at the repo root. It is git-ignored: never commit it, and don't store project memory anywhere else. Memory is for short-term notes. Anything lasting belongs in its proper project file (ARCHITECTURE.md, ROADMAP.md, this file, docs/), so promote it there and delete it from memory. An empty memory folder is the goal.
 - **No automatic commits.** Leave changes uncommitted so the user can review the file diffs. Commit only when the user says to, for example "commit when done". That counts as approval for that request only, not for later work. The same goes for pushing.
 
+- **No live runs without explicit approval.** Default to the seeded dev instance (`docs/development.md`) with fakes. Only run Siftstr against real upstreams (Miniflux, Karakeep, MeTube, Nostr relays) or with locally stored API keys when the user explicitly asks for that run. If it isn't explicit, ask for confirmation first, every time. Earlier approval doesn't carry over to later runs.
+
 ## Issue triage
 
 Context for the issue skills (`/evaluate-issue`, `/update-issue`, `/implement-issues`, `/done`).

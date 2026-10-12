@@ -1,7 +1,10 @@
 {{define "content"}}
-<h1>{{.Heading}}</h1>
+<div class="listbar" data-flow="{{.PhoneFlow}}">
+  <h1>{{.Heading}}</h1>
+  {{if .Items}}<small class="more" data-more aria-hidden="true"></small>{{end}}
+</div>
 {{if .Items}}
-<section class="items" aria-label="{{.Heading}}">
+<section class="items" data-flow="{{.PhoneFlow}}" aria-label="{{.Heading}}">
   {{range .Items}}{{template "item" .}}{{end}}
 </section>
 {{else}}

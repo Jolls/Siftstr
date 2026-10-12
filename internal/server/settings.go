@@ -15,6 +15,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/ingest/nostr"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
+	"github.com/Jolls/Siftstr/internal/triage"
 	"github.com/Jolls/Siftstr/internal/ui"
 	"github.com/Jolls/Siftstr/internal/writeback"
 )
@@ -57,6 +58,10 @@ func (s *server) renderSources(w http.ResponseWriter, req *http.Request, sess *s
 	p := s.settingsPage(sess, req, "Sources")
 	p.Error = msg
 	if p.Timezone, err = s.Runs.Timezone(req.Context(), sess.User.ID); err != nil {
+		serverError(w)
+		return
+	}
+	if p.PhoneFlow, err = s.Triage.PhoneFlow(req.Context(), sess.User.ID); err != nil {
 		serverError(w)
 		return
 	}
@@ -306,6 +311,18 @@ func (s *server) promptsSave(w http.ResponseWriter, req *http.Request, sess *ses
 func (s *server) timezoneSave(w http.ResponseWriter, req *http.Request, sess *session) {
 	if err := s.Runs.SetTimezone(req.Context(), sess.User.ID, req.PostFormValue("timezone")); err != nil {
 		if errors.Is(err, runs.ErrBadTimezone) {
+			s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
+			return
+		}
+		serverError(w)
+		return
+	}
+	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+}
+
+func (s *server) displaySave(w http.ResponseWriter, req *http.Request, sess *session) {
+	if err := s.Triage.SetPhoneFlow(req.Context(), sess.User.ID, req.PostFormValue("phone_flow")); err != nil {
+		if errors.Is(err, triage.ErrBadFlow) {
 			s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
 			return
 		}

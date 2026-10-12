@@ -33,6 +33,7 @@ type Page struct {
 	Sources      []SourceRow
 	Ingest       IngestForm
 	Timezone     string
+	PhoneFlow    string // "up" or "down": list direction on a phone (item lists and /settings/sources)
 	ZoneGroups   []ZoneGroup
 	Keys         []KeyRow
 	NewKey       string // a just-created API key, shown once
