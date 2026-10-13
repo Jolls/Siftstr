@@ -11,13 +11,43 @@ func (b Briefing) Markdown() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "---\ndate: %s\ntoday: %d\nbacklog: %d\nfinal: %t\n---\n\n", b.Day, len(b.Today), len(b.Backlog), b.Final)
 	fmt.Fprintf(&sb, "# Siftstr briefing %s\n", b.Day)
-	section(&sb, "Today", b.Today, "Nothing arrived today.")
-	section(&sb, "Backlog", b.Backlog, "Nothing carried over.")
+	section(&sb, "Today", b.Highlight, b.Today, "Nothing arrived today.")
+	section(&sb, "Backlog", nil, b.Backlog, "Nothing carried over.")
 	return sb.String()
 }
 
-func section(sb *strings.Builder, name string, entries []Entry, empty string) {
+// highlight writes the day's highlight as the first entry under Today.
+func highlight(sb *strings.Builder, h *Highlight) {
+	sb.WriteString("\n### Highlight\n\n")
+	for _, line := range strings.Split(strings.TrimSpace(h.Text), "\n") {
+		fmt.Fprintf(sb, "> %s\n", strings.TrimSpace(line))
+	}
+	if n := strings.TrimSpace(h.Note); n != "" {
+		fmt.Fprintf(sb, "\nNote: %s\n", oneLine(n))
+	}
+	title := oneLine(h.Title)
+	if title == "" {
+		title = oneLine(h.Byline)
+	}
+	switch {
+	case title != "" && h.URL != "":
+		fmt.Fprintf(sb, "\nFrom [%s](%s)", escapeLink(title), linkURL(h.URL))
+	case title != "":
+		fmt.Fprintf(sb, "\nFrom %s", title)
+	default:
+		return
+	}
+	if by := oneLine(h.Byline); by != "" && by != title {
+		fmt.Fprintf(sb, " · %s", by)
+	}
+	sb.WriteString("\n")
+}
+
+func section(sb *strings.Builder, name string, h *Highlight, entries []Entry, empty string) {
 	fmt.Fprintf(sb, "\n## %s\n", name)
+	if h != nil {
+		highlight(sb, h)
+	}
 	if len(entries) == 0 {
 		fmt.Fprintf(sb, "\n%s\n", empty)
 		return

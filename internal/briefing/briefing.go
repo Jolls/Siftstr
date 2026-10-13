@@ -41,12 +41,24 @@ type Entry struct {
 	Outcome   string
 }
 
+// Highlight is the Karakeep highlight picked for a day. It is shown before
+// the day's entries and is not an entry: nothing can be done with it.
+type Highlight struct {
+	Text   string
+	Note   string
+	Color  string
+	Title  string // the bookmark it was marked in; empty when that could not be read
+	URL    string
+	Byline string
+}
+
 // Briefing is one day's briefing for one user.
 type Briefing struct {
-	Day     string // the user's local date, YYYY-MM-DD
-	Final   bool   // outcomes are final: untriaged entries read "carried over"
-	Today   []Entry
-	Backlog []Entry
+	Day       string // the user's local date, YYYY-MM-DD
+	Final     bool   // outcomes are final: untriaged entries read "carried over"
+	Highlight *Highlight
+	Today     []Entry
+	Backlog   []Entry
 }
 
 // Service builds and writes briefings.
@@ -68,6 +80,9 @@ func New(db *sql.DB, dir string) *Service { return &Service{DB: db, Dir: dir} }
 func (s *Service) Build(ctx context.Context, userID, day string, final bool) (Briefing, error) {
 	b := Briefing{Day: day, Final: final}
 	var err error
+	if b.Highlight, err = s.highlight(ctx, userID, day); err != nil {
+		return b, err
+	}
 	if b.Today, err = s.entries(ctx, userID, `x.batch_date = ? AND x.state IN ('light', 'deep', 'archived', 'kept', 'pending_deep', 'expired')`, day, final); err != nil {
 		return b, err
 	}
@@ -75,6 +90,22 @@ func (s *Service) Build(ctx context.Context, userID, day string, final bool) (Br
 		return b, err
 	}
 	return b, nil
+}
+
+// highlight returns the highlight stored for day, or nil. It reads only
+// SQLite: the pick is made by the highlights timer, never while a page loads.
+func (s *Service) highlight(ctx context.Context, userID, day string) (*Highlight, error) {
+	var h Highlight
+	err := s.DB.QueryRowContext(ctx, `SELECT text, note, color, bookmark_title, bookmark_url, byline
+		FROM highlight_picks WHERE user_id = ? AND day = ?`, userID, day).
+		Scan(&h.Text, &h.Note, &h.Color, &h.Title, &h.URL, &h.Byline)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read highlight: %w", err)
+	}
+	return &h, nil
 }
 
 func outcome(state string, promoted, final bool) string {

@@ -99,7 +99,7 @@ func TestOpenAppliesMigrationsOnceAndUsesWAL(t *testing.T) {
 	}
 	defer s.Close()
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 8 {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 9 {
 		t.Fatalf("migrations = %d, %v", n, err)
 	}
 }

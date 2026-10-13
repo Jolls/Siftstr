@@ -88,7 +88,7 @@ func (s *server) readPage(w http.ResponseWriter, req *http.Request, sess *sessio
 	}
 	p := s.page(sess, "read", "Read")
 	p.Day = day
-	p.Today, p.Backlog = b.Today, b.Backlog
+	p.Highlight, p.Today, p.Backlog = b.Highlight, b.Today, b.Backlog
 	w.Header().Set("Cache-Control", "no-store")
 	s.ui.Render(w, http.StatusOK, "read", p)
 }

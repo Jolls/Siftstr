@@ -49,6 +49,7 @@ internal/triage/        item state machine, action log, undo
 internal/sync/          /sync/actions endpoint and reconciliation
 internal/briefing/      builds the daily briefing; renders /read and the markdown file
 internal/ingest/        shared placement and Karakeep-bookmark helpers; miniflux/, nostr/, karakeep/ (bookmarks as a source, and reading Karakeep's summary back)
+internal/highlights/    the daily Karakeep highlight: ID cache, weekly refresh, one pick per day
 internal/dest/          miniflux/, karakeep/, metube/, youtube/  (Destination impls)
 internal/outbox/        queue and workers
 internal/janitor/       six-month cleanup and the daily database snapshot

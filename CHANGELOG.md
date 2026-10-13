@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-10-12
+### Added
+- Karakeep highlights: an opt-in setting on Settings → Sources puts one of your Karakeep highlights, with its note and a link to the bookmark, first under Today in the briefing and on `/read`. Siftstr reads your highlights when it starts and then weekly, and shows a different one each day until it has shown them all ([#34](https://github.com/Jolls/Siftstr/issues/34))
+
 ## [0.2.4] - 2026-10-12
 ### Added
 - Settings → Sessions lists your active sessions and has a Sign out everywhere button that ends every signed-in session, including the current one ([#22](https://github.com/Jolls/Siftstr/issues/22))

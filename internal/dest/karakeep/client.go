@@ -271,3 +271,85 @@ func (c *Client) DetachTags(ctx context.Context, id string, names []string) erro
 	}
 	return err
 }
+
+// Highlight is a passage the user marked in a bookmark.
+type Highlight struct {
+	ID         string
+	BookmarkID string
+	Color      string
+	Text       string // empty when Karakeep stored none
+	Note       string
+	CreatedAt  time.Time
+}
+
+// UnmarshalJSON reads Karakeep's highlight, where text and note can be null.
+func (h *Highlight) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID         string  `json:"id"`
+		BookmarkID string  `json:"bookmarkId"`
+		Color      string  `json:"color"`
+		Text       *string `json:"text"`
+		Note       *string `json:"note"`
+		CreatedAt  string  `json:"createdAt"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*h = Highlight{ID: raw.ID, BookmarkID: raw.BookmarkID, Color: raw.Color}
+	if raw.Text != nil {
+		h.Text = *raw.Text
+	}
+	if raw.Note != nil {
+		h.Note = *raw.Note
+	}
+	if raw.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, raw.CreatedAt); err == nil {
+			h.CreatedAt = t
+		}
+	}
+	return nil
+}
+
+// HighlightPage is one page of a highlight listing.
+type HighlightPage struct {
+	Highlights []Highlight
+	NextCursor string // empty on the last page
+}
+
+// MaxHighlightsPerPage is the most highlights Karakeep returns in one page.
+const MaxHighlightsPerPage = 100
+
+// ListHighlights returns one page of the user's highlights, newest first.
+// Karakeep has no count or random pick, so a caller that wants either walks
+// the pages. Pass the previous page's NextCursor to continue.
+func (c *Client) ListHighlights(ctx context.Context, cursor string, limit int) (HighlightPage, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	if cursor != "" {
+		q.Set("cursor", cursor)
+	}
+	var out struct {
+		Highlights []Highlight `json:"highlights"`
+		NextCursor *string     `json:"nextCursor"`
+	}
+	if _, err := dest.Call(ctx, c.hc, http.MethodGet, c.base+"/api/v1/highlights?"+q.Encode(), c.header(), nil, &out); err != nil {
+		return HighlightPage{}, err
+	}
+	p := HighlightPage{Highlights: out.Highlights}
+	if out.NextCursor != nil {
+		p.NextCursor = *out.NextCursor
+	}
+	return p, nil
+}
+
+// ErrHighlightNotFound means Karakeep has no such highlight.
+var ErrHighlightNotFound = errors.New("karakeep: highlight not found")
+
+// GetHighlight returns one highlight.
+func (c *Client) GetHighlight(ctx context.Context, id string) (Highlight, error) {
+	var h Highlight
+	status, err := dest.Call(ctx, c.hc, http.MethodGet, c.base+"/api/v1/highlights/"+url.PathEscape(id), c.header(), nil, &h)
+	if status == http.StatusNotFound {
+		return h, ErrHighlightNotFound
+	}
+	return h, err
+}
