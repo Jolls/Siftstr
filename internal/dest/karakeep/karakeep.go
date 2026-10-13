@@ -38,6 +38,9 @@ func Factory(baseURL, secret string, _ json.RawMessage) dest.Destination {
 	return New(baseURL, secret, nil)
 }
 
+// Check implements dest.Checker.
+func (d *Destination) Check(ctx context.Context) error { return d.c.Check(ctx) }
+
 // Name implements dest.Destination.
 func (d *Destination) Name() string { return "karakeep" }
 

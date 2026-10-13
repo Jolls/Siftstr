@@ -101,6 +101,10 @@ form.inline button { margin: 0; width: auto; padding: 0.25rem 0.75rem; }
 .notice { color: var(--pico-ins-color); }
 .source textarea { min-height: 4rem; }
 .destination form.inline { margin-top: 0.5rem; }
+/* Connection check result: the label carries the meaning, color only reinforces it. */
+.conn-status { margin: 0.75rem 0 0; }
+.conn-status[data-state="ok"] strong { color: var(--pico-ins-color); }
+.conn-status:not([data-state="ok"]):not([data-state=""]) strong { color: var(--pico-del-color); }
 
 .sync { color: var(--pico-muted-color); }
 .sync[data-state="auth"] { color: var(--pico-del-color); }

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-10-12
+### Added
+- Settings → Destinations shows whether each Miniflux, Karakeep and MeTube connection works: Siftstr tests it when you save it or press Test connection, and shows Connected or the reason it failed (can't reach it, certificate problem, key problem, unexpected response) with when it was last checked. Fetching new items and sending updates keep the result current, and a failed check is logged without the key ([#13](https://github.com/Jolls/Siftstr/issues/13))
+- `SIFTSTR_MINIFLUX_URL`, `SIFTSTR_KARAKEEP_URL` and `SIFTSTR_METUBE_URL`, with `SIFTSTR_MINIFLUX_API_KEY` and `SIFTSTR_KARAKEEP_API_KEY` (or their `_FILE` variants), pre-fill the admin user's connections at startup, stored encrypted like ones entered under Settings → Destinations. The URL is re-applied on every start; a key is saved only when the connection has none ([#12](https://github.com/Jolls/Siftstr/issues/12))
+- Settings → Destinations shows a hint under a saved base URL that is plain `http://` to an address that may be public, since its token travels unencrypted ([#23](https://github.com/Jolls/Siftstr/issues/23), [#16](https://github.com/Jolls/Siftstr/issues/16))
+### Changed
+- Passwords must be at least 12 characters (was 8) for `siftstr user add`, `siftstr user set-password` and the bootstrap admin. Existing passwords keep working ([#23](https://github.com/Jolls/Siftstr/issues/23), [#16](https://github.com/Jolls/Siftstr/issues/16))
+### Security
+- Miniflux ingest no longer follows redirects, so its API token is never sent to another address. A redirect is reported as an error that says to save the final address ([#23](https://github.com/Jolls/Siftstr/issues/23), [#16](https://github.com/Jolls/Siftstr/issues/16))
+- With an `https://` `SIFTSTR_BASE_URL`, the session and login cookies are named `__Host-siftstr_session` and `__Host-siftstr_login` (`Path=/`), so a sibling subdomain cannot set or overwrite them. Everyone signs in once after upgrading ([#23](https://github.com/Jolls/Siftstr/issues/23), [#16](https://github.com/Jolls/Siftstr/issues/16))
+- The Content-Security-Policy adds `base-uri 'none'` and `object-src 'none'` ([#23](https://github.com/Jolls/Siftstr/issues/23), [#16](https://github.com/Jolls/Siftstr/issues/16))
+
 ## [0.2.6] - 2026-10-12
 ### Added
 - Karakeep highlights: an opt-in setting on Settings → Sources puts one of your Karakeep highlights, with its note and a link to the bookmark, first under Today in the briefing and on `/read`. Siftstr reads your highlights when it starts and then weekly, and shows a different one each day until it has shown them all ([#34](https://github.com/Jolls/Siftstr/issues/34))

@@ -18,9 +18,17 @@ services:
       # Optional. CIDRs your reverse proxy connects from, so login limits see
       # each client's IP (from X-Forwarded-For). Leave empty without a proxy.
       SIFTSTR_TRUSTED_PROXIES: ${SIFTSTR_TRUSTED_PROXIES:-}
-      # Created on first start only, when there are no users yet.
+      # Created on first start only, when there are no users yet. Password: at least 12 characters.
       SIFTSTR_ADMIN_USER: ${SIFTSTR_ADMIN_USER:-}
       SIFTSTR_ADMIN_PASSWORD: ${SIFTSTR_ADMIN_PASSWORD:-}
+      # Optional. Pre-fill the admin user's connections (Settings, Destinations).
+      # For keys, *_API_KEY_FILE pointing at a Docker secret keeps them out of
+      # the container environment.
+      SIFTSTR_MINIFLUX_URL: ${SIFTSTR_MINIFLUX_URL:-}
+      SIFTSTR_MINIFLUX_API_KEY: ${SIFTSTR_MINIFLUX_API_KEY:-}
+      SIFTSTR_KARAKEEP_URL: ${SIFTSTR_KARAKEEP_URL:-}
+      SIFTSTR_KARAKEEP_API_KEY: ${SIFTSTR_KARAKEEP_API_KEY:-}
+      SIFTSTR_METUBE_URL: ${SIFTSTR_METUBE_URL:-}
       # Optional. Leave unset to auto-generate /data/secret.key.
       SIFTSTR_SECRET_KEY: ${SIFTSTR_SECRET_KEY:-}
       TZ: ${TZ:-UTC}

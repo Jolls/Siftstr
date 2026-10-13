@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,7 +27,7 @@ func (e *env) sessionCount(t *testing.T, user string) int {
 
 func sessionCookieCleared(resp *http.Response) bool {
 	for _, ck := range resp.Cookies() {
-		if ck.Name == sessionCookie && ck.MaxAge < 0 {
+		if ck.Name == "siftstr_session" && ck.MaxAge < 0 {
 			return true
 		}
 	}
@@ -163,5 +164,53 @@ func TestSessionsPageRenders(t *testing.T) {
 		if strings.Contains(body, id) {
 			t.Error("session id leaked into page")
 		}
+	}
+}
+
+// secureSessionPost signs in by hand (the test server is plain HTTP and the
+// cookie is Secure), reads the CSRF token from /today and posts to path.
+func secureSessionPost(t *testing.T, e *env, path string) *http.Response {
+	t.Helper()
+	u, err := e.auth.CreateUser(context.Background(), "alice", "password-one", auth.RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := e.auth.NewSession(context.Background(), u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ck := &http.Cookie{Name: "__Host-siftstr_session", Value: token}
+	hc := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/today", nil)
+	req.AddCookie(ck)
+	resp, err := hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := csrfRe.FindStringSubmatch(e.body(t, resp))
+	if m == nil {
+		t.Fatal("no csrf token on /today")
+	}
+	req, _ = http.NewRequest(http.MethodPost, e.srv.URL+path, strings.NewReader(url.Values{"csrf": {m[1]}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(ck)
+	resp, err = hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestLogoutClearsHostPrefixedCookieWhenSecure(t *testing.T) {
+	resp := secureSessionPost(t, setup(t, nil, true), "/logout")
+	if ck := cookieByName(resp, "__Host-siftstr_session"); ck == nil || ck.MaxAge >= 0 || !ck.Secure || ck.Path != "/" {
+		t.Fatalf("cookie = %+v", ck)
+	}
+}
+
+func TestSignOutEverywhereClearsHostPrefixedCookieWhenSecure(t *testing.T) {
+	resp := secureSessionPost(t, setup(t, nil, true), "/settings/sessions/end-all")
+	if ck := cookieByName(resp, "__Host-siftstr_session"); ck == nil || ck.MaxAge >= 0 || !ck.Secure || ck.Path != "/" {
+		t.Fatalf("cookie = %+v", ck)
 	}
 }

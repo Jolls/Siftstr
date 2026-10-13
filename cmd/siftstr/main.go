@@ -84,7 +84,7 @@ func run(args []string, stdin io.Reader) error {
 
 // open loads config, the database and the auth service.
 func open(ctx context.Context) (config.Config, *store.Store, *auth.Service, error) {
-	cfg, err := config.Load(os.Getenv)
+	cfg, err := config.Load(os.Getenv, os.ReadFile)
 	if err != nil {
 		return cfg, nil, nil, err
 	}
@@ -135,6 +135,9 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	if err := seedConnections(ctx, st.DB(), cfg, conns, log.Printf); err != nil {
+		return err
+	}
 	// Write-back: releasing a held action queues its upstream effects in the
 	// same transaction, and a deep summary queues a promoted item's Karakeep
 	// save. The outbox job below sends them.
@@ -143,8 +146,14 @@ func serve() error {
 	tr.OnRelease = planner.OnRelease
 	rn := runs.New(st.DB())
 	rn.OnDeep = planner.OnDeep
+	// One set of destination factories serves the outbox and the connection test.
+	factories := map[string]dest.Factory{
+		writeback.Miniflux: destminiflux.Factory,
+		writeback.Karakeep: karakeep.Factory,
+		writeback.MeTube:   metube.Factory,
+	}
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies,
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies, CheckConnection: dest.CheckFunc(factories),
 	})
 	if err != nil {
 		return err
@@ -234,11 +243,7 @@ func serve() error {
 	}); err != nil {
 		return err
 	}
-	sender := &writeback.Sender{DB: st.DB(), Conns: conns, Factories: map[string]dest.Factory{
-		writeback.Miniflux: destminiflux.Factory,
-		writeback.Karakeep: karakeep.Factory,
-		writeback.MeTube:   metube.Factory,
-	}}
+	sender := &writeback.Sender{DB: st.DB(), Conns: conns, Factories: factories, Now: time.Now}
 	ob := &outbox.Runner{DB: st.DB(), Handle: sender.Handle, Now: time.Now}
 	if err := sched.Register(scheduler.Job{
 		Name: "outbox", Interval: 30 * time.Second, Scope: scheduler.PerUser, RunOnStart: true,

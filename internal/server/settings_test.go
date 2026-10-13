@@ -561,3 +561,51 @@ func TestAccentListMatchesCSS(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainHTTPToPublicHost(t *testing.T) {
+	for u, want := range map[string]bool{
+		"http://mf.example.com": true, "http://203.0.113.5:8080": true, "http://[2001:db8::1]/": true,
+		"https://mf.example.com": false, "http://localhost": false, "http://foo.localhost": false,
+		"http://127.0.0.1:8080": false, "http://10.0.0.2": false, "http://172.16.5.4": false,
+		"http://192.168.1.20:8080": false, "http://169.254.1.1": false, "http://100.64.0.1": false,
+		"http://[fd00::1]": false, "http://[::1]": false, "http://[fe80::1]": false,
+		"http://miniflux:8080": false, "http://nas.local": false, "http://nas.lan": false,
+		"http://nas.home.arpa": false, "http://svc.internal": false, "not a url": false,
+	} {
+		if got := plainHTTPToPublicHost(u); got != want {
+			t.Errorf("%q = %v, want %v", u, got, want)
+		}
+	}
+}
+
+func TestDestinationNoPlainHTTPHintForPrivateOrHTTPS(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	for _, base := range []string{"https://mf.example.com", "http://192.168.1.20:8080", "http://miniflux:8080", "http://localhost:8080", "http://100.101.102.103"} {
+		resp := e.post(t, c, "/settings/destinations/miniflux", url.Values{"csrf": {csrf}, "base_url": {base}, "secret": {"tok"}})
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("%s: save = %d", base, resp.StatusCode)
+		}
+		if _, body := e.get(t, c, "/settings/destinations"); strings.Contains(body, "plain-http-hint") {
+			t.Errorf("%s: hint shown", base)
+		}
+	}
+}
+
+func TestDestinationPlainHTTPPublicHostShowsHint(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	resp := e.post(t, c, "/settings/destinations/miniflux", url.Values{"csrf": {csrf}, "base_url": {"http://mf.example.com"}, "secret": {"tok-SECRET"}})
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	_, body := e.get(t, c, "/settings/destinations")
+	for _, want := range []string{"plain-http-hint", `aria-describedby="plain-http-miniflux"`, "API token"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page missing %q", want)
+		}
+	}
+	if strings.Contains(body, "tok-SECRET") {
+		t.Error("secret echoed")
+	}
+}

@@ -382,7 +382,10 @@ users          id, username UNIQUE, password_hash, role[admin|user], timezone,
 sessions       id (hashed token), user_id, created_at, expires_at, last_seen_at
 api_keys       id, user_id, key_hash, label, created_at, last_used_at, revoked_at
 connections    id, user_id, kind[miniflux|karakeep|metube|youtube|nextcloud|nostr],
-               base_url, secret_enc, config_json
+               base_url, secret_enc, config_json,
+               check_state[ok|unreachable|tls|auth|unexpected], check_detail,
+               check_via[save|test|ingest|outbox], checked_at
+               -- the last connection check; never holds a secret
 
 -- workflow (every row is user-owned)
 sources        id, user_id, kind[miniflux_feed|nostr|karakeep], external_id, name, category,
@@ -449,7 +452,7 @@ An item's current outcome is derived from its latest effective action. The janit
 | `/settings/prompts` | Global and per-source summarization instructions |
 | `/settings/activity` | Outbox log: stopped updates with Retry and Dismiss |
 | `/settings/sessions` | Active sessions and Sign out everywhere |
-| `/settings/destinations` | Video destinations, export target, upstream connections |
+| `/settings/destinations` | Video destinations, export target, upstream connections with their last check result and a Test connection button |
 | `/login` | Login |
 
 **Which cards a list shows.** "Today" is the user's local date (their timezone setting). `/today` shows every card ingested today (a digest: summarized today), actioned or not. `/backlog` shows cards from earlier days that are still `light` or `deep`, plus earlier cards actioned recently enough to still be undone, so an action never makes a card vanish under you. A digest is one card in place of its entries. Digests still waiting for their summary, and expired cards, appear nowhere.
@@ -470,14 +473,15 @@ An item's current outcome is derived from its latest effective action. The janit
 
 ### Login (v1)
 
-- **Username and password** on a login form, which creates a server-side session. The session cookie is `HttpOnly`, `Secure`, and `SameSite=Lax`. This is simple login rather than HTTP Basic auth: Basic auth has no logout, sends the password on every request, and handles multiple users poorly.
-- Passwords are stored with argon2id.
+- **Username and password** on a login form, which creates a server-side session. The session cookie is `HttpOnly`, `Secure`, and `SameSite=Lax`. When `SIFTSTR_BASE_URL` is `https://` the session cookie is named `__Host-siftstr_session` and the login form's CSRF cookie `__Host-siftstr_login`, both with `Path=/` and no `Domain`, so a sibling subdomain cannot set or overwrite them. Over plain HTTP they are `siftstr_session` and `siftstr_login` and are not `Secure`. This is simple login rather than HTTP Basic auth: Basic auth has no logout, sends the password on every request, and handles multiple users poorly.
+- Passwords are at least 12 characters, checked by `siftstr user add`, `siftstr user set-password` and the bootstrap admin (a shorter `SIFTSTR_ADMIN_PASSWORD` stops startup with an error). Existing shorter passwords keep working until changed. Passwords are stored with argon2id.
 - Failed logins are limited per (username, client IP) pair: 5 failures in 15 minutes block that pair, so failures from one source cannot lock a user out everywhere. 20 failures in 15 minutes from one client IP block that IP; an IPv6 client counts as its /64. Failures for one username from every source slow its logins down instead of blocking them: from the 10th failure in 15 minutes each attempt waits 1 second, doubling per further failure up to 30 seconds. Each attempt counts before its password is checked, so concurrent attempts cannot slip past a limit, and a successful login clears its pair's count. Usernames are at most 64 bytes. Each counter holds at most 10,000 entries and drops expired ones every minute.
 - At most two password checks run at once (each argon2id check takes 64 MiB). A login that finds both busy gets `429` at once instead of waiting, and is not counted as a failure.
 - CSRF protection applies to state-changing HTML routes and `/sync/actions`.
 - **Sessions.** A session lasts at most 30 days from sign-in, and ends sooner when it goes unused for 7 days (its `last_seen_at`, updated on every request), so a device used once a day stays signed in. Settings → Sessions lists the active sessions and has **Sign out everywhere**, which ends every session of the user, including the current one (CSRF-protected). `siftstr user set-password` also ends them all. Queued actions survive a forced sign-out: they wait in the page's `localStorage` queue and are sent after the next sign-in.
 - **Bootstrap:** on first start with an empty `users` table, Siftstr creates an admin user from `SIFTSTR_ADMIN_USER` and `SIFTSTR_ADMIN_PASSWORD`. The `siftstr user add` and `siftstr user set-password` CLI commands can also create users and reset passwords, which also gives platform wrappers (such as the StartOS package) a way to set the admin password. v1 has no other user management.
 - **Behind a TLS proxy.** Inside the container every request arrives as plain HTTP, so the `Secure` cookie flag and any absolute URLs come from config (`SIFTSTR_BASE_URL`), not from `r.TLS`. Don't reject requests based on the `Host` header. The client IP for login limits is the connecting address unless that address is inside `SIFTSTR_TRUSTED_PROXIES`; then it is read from `X-Forwarded-For`, right to left, skipping trusted hops. At startup Siftstr logs a warning when `SIFTSTR_BASE_URL` is empty or not `https://`. When it is `https://`, every response also carries `Strict-Transport-Security: max-age=31536000`; browsers ignore it over plain HTTP.
+- **Response headers.** Every response carries `Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`.
 
 ### API keys
 
@@ -490,6 +494,8 @@ An item's current outcome is derived from its latest effective action. The janit
 
 - **Scoping:** every user-owned row has `user_id`. Every read and write filters by the authenticated user. A row is never looked up by ID alone. If a request names another user's item, the response is `404`, not `403`.
 - **Upstream credentials are per user**, stored in `connections` and encrypted at rest with an instance key (`SIFTSTR_SECRET_KEY`, or auto-generated into `/data/secret.key` on first start; see §13). They are entered in Settings, never logged, and never returned by any endpoint once saved. Users can point at the same MeTube or Karakeep instance, but each has their own connection row.
+- **Upstream clients do not follow redirects.** Miniflux ingest and every destination adapter treat a 3xx as an error whose message says to save the final address, so a token is never sent to another host. `http://` base URLs are accepted (fine on a LAN); Settings → Destinations shows a hint under a saved base URL that is `http://` to a host that is not private. Private means an IP literal that is loopback, RFC 1918 / ULA, link-local or `100.64.0.0/10`, or a name that is `localhost`, single-label, or ends in `.localhost`, `.local`, `.lan`, `.home.arpa` or `.internal`. Names are never resolved.
+- **Connection checks.** Saving a Miniflux, Karakeep or MeTube connection (or pressing Test connection) makes one read-only authenticated call (Miniflux `GET /v1/me`, Karakeep `GET /api/v1/users/me`, MeTube `GET /history`) and stores the result on the connection row. Ingest and the outbox update it as they call the upstream, writing only when the result changes or is an hour old. A failed check is logged once with the kind, the base URL and the reason, never the key.
 - **Background jobs are scoped too.** Ingest, release, and export run per user, with that user's connections. One user's failing upstream must not block another user's jobs.
 - **The client queue is per user.** The `localStorage` queue is keyed by user ID and only sent under a matching session. Logging out with unsent actions shows a warning.
 - **Markdown export paths are per user**, e.g. a path template that includes the username.
@@ -498,6 +504,10 @@ An item's current outcome is derived from its latest effective action. The janit
 
 - HTML form POSTs are size-limited before parsing: `POST /login` 16 KB; `POST /logout` and `POST /settings/*` 1 MB. Over the limit gets `413`. `/sync/actions` is limited to 1 MB and `/api/*` summaries to 8 MB, each in its own handler.
 - The HTTP server sets `ReadHeaderTimeout` 10s, `ReadTimeout` 60s (covers the 8 MB summaries upload), `WriteTimeout` 60s, `IdleTimeout` 120s.
+
+### Known limitations
+
+- **Internal network probing from connection URLs (SSRF).** A signed-in user can set a connection's base URL or a Nostr relay to any address, including hosts on the server's internal network, and the resulting connection errors appear on the Activity page. With one trusted user in v1 this is accepted. Revisit before multi-user (ROADMAP), for example by limiting which addresses non-admin users may save.
 
 ### Exposure
 The Claude scheduled task has to reach the instance over the network. That affects how it gets exposed (LAN only, VPN such as Tailscale, Tor, or a public domain). See open questions.
@@ -554,9 +564,13 @@ Everything that must survive a restart lives under `/data`, so a single named vo
 | `SIFTSTR_TRUSTED_PROXIES` | none | Comma-separated CIDRs (or single IPs) of reverse proxies. Only a request that connects from one of them has its client IP taken from `X-Forwarded-For`, read from the right and skipping trusted hops; otherwise the connecting address is the client IP. Used by the login limits |
 | `SIFTSTR_SECRET_KEY` | auto-generated file | Encryption key for `connections` secrets |
 | `SIFTSTR_ADMIN_USER` / `SIFTSTR_ADMIN_PASSWORD` | none | Bootstrap admin on first start |
+| `SIFTSTR_MINIFLUX_URL`, `SIFTSTR_KARAKEEP_URL`, `SIFTSTR_METUBE_URL` | none | Seed that service's connection (see Seeded connections below) |
+| `SIFTSTR_MINIFLUX_API_KEY`, `SIFTSTR_KARAKEEP_API_KEY` (or `..._FILE`) | none | Key for the seeded connection, or a path to a file holding it; not both |
 | `TZ` | `UTC` | Default timezone for new users |
 
-Everything else (timers, grace period, user settings, upstream connections) is set in the app and stored in the database, not in env vars.
+Everything else (timers, grace period, user settings, upstream connections) is set in the app and stored in the database. The connection variables above only seed the database.
+
+**Seeded connections.** At startup, after the bootstrap admin is created and before the timers start, Siftstr applies the connection variables to one user: the user named by `SIFTSTR_ADMIN_USER`, or the oldest enabled admin when that is empty. If that user is missing or disabled it logs one line and seeds nothing. The seed is stored encrypted in `connections` exactly like a connection entered under Settings, Destinations, and it never creates a second connection of a kind. It is re-applied on every start: a missing connection is created, an existing one has its URL set to the env URL when they differ, and the key is saved only when the connection has none, so a key entered in the UI is never replaced. Consequences: a URL edited in the UI is reset on the next start while the env URL is set, and a connection disconnected in the UI comes back. A URL alone is valid (the user enters the key in the UI); a key without its URL stops startup with an error, as do a bad URL, setting both `..._API_KEY` and `..._API_KEY_FILE`, and an unreadable or empty key file. MeTube's optional secret stays UI-only. The key sits in the container environment unless the `_FILE` form is used. Logs name only the kind and the username, never the URL or key.
 
 **Backups**
 - Back up the whole `/data` directory.
@@ -569,6 +583,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 **What a platform wrapper needs** (StartOS or anything else; no wrapper code lives in this repo)
 - Run the image with a persistent volume on `/data`, expose port 8080 over HTTPS, and health-check `/healthz`.
 - To set the admin password without env vars, run `siftstr user set-password`.
+- To pre-fill upstream addresses, set `SIFTSTR_MINIFLUX_URL`, `SIFTSTR_KARAKEEP_URL` and `SIFTSTR_METUBE_URL` (and the keys, if the wrapper has them); see Seeded connections.
 
 ---
 
@@ -602,6 +617,7 @@ Everything else (timers, grace period, user settings, upstream connections) is s
 26. ~~**Which day an item belongs to.**~~ **Decided (2026-10-11):** an item's `batch_date` is the user's local date when it was ingested, and carryover at the morning run moves earlier days' untriaged items to Backlog or expires them as before. A promoted item whose summary arrives (Claude's, or Karakeep's) is moved to the user's current day, so it comes back in Today. Items that were waiting for a light summary under the old flow were released to `light` by migration 7, on the day they were ingested.
 27. ~~**What delete does to a bookmark Siftstr did not create.**~~ **Decided (2026-10-11):** bookmarks the user saved by hand go through triage like any other, and Delete removes them too. There is no list or tag scoping. The swipe is labelled Delete, so it is clear what it does.
 28. **Internal names.** *Label rename done (2026-10-11), identifiers unchanged as proposed.* The outcome is called Delete in the UI and docs, but the stored action kind (`archive`), the item state (`archived`), the sync API and the CSS still use the old name for both swipe-left outcomes (delete on the first look, archive on the second; the write-back depends on the item's state when the action arrives), and the state values already exist in shipped databases. *Proposed:* keep the identifiers until there is a reason to migrate, and rename the label, buttons and badge only. Revisit if the mismatch confuses contributors, since a rename needs an append-only migration and a sync API change.
+29. ~~**Seeding connections from instance config.**~~ **Decided (2026-10-12):** the target is the user named by `SIFTSTR_ADMIN_USER`, else the oldest enabled admin. The URL is re-applied on every start and a key is saved only when the connection has none. Keys come from `..._API_KEY` or `..._API_KEY_FILE`. The MeTube URL is seeded too, but not its secret. A URL alone is valid and a key alone is an error. Settings, Destinations does not mark a connection as seeded.
 
 ---
 

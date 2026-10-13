@@ -59,6 +59,12 @@ type BookmarkReporter interface {
 	BookmarkID() string
 }
 
+// StatusError is a reply outside 2xx. Its text is only "status N", so the
+// wrapping message reads as before.
+type StatusError struct{ Code int }
+
+func (e *StatusError) Error() string { return fmt.Sprintf("status %d", e.Code) }
+
 // Destination sends an item to one upstream. Send must be idempotent: the
 // outbox may call it again after a crash or a timeout.
 type Destination interface {
@@ -120,12 +126,12 @@ func Call(ctx context.Context, hc *http.Client, method, url string, header map[s
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("%s %s: %w", method, redact(url), errors.Unwrap(err))
+		return 0, fmt.Errorf("%s %s: %w", method, Redact(url), errors.Unwrap(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-		err := fmt.Errorf("%s %s: status %d", method, redact(url), resp.StatusCode)
+		err := fmt.Errorf("%s %s: %w", method, Redact(url), &StatusError{Code: resp.StatusCode})
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			err = fmt.Errorf("%w (redirect: check that the saved base URL is the final address, e.g. https)", err)
 		}
@@ -141,16 +147,16 @@ func Call(ctx context.Context, hc *http.Client, method, url string, header map[s
 		}
 		if len(bytes.TrimSpace(data)) > 0 {
 			if err := json.Unmarshal(data, out); err != nil {
-				return resp.StatusCode, fmt.Errorf("%s %s: decode: %w", method, redact(url), err)
+				return resp.StatusCode, fmt.Errorf("%s %s: decode: %w", method, Redact(url), err)
 			}
 		}
 	}
 	return resp.StatusCode, nil
 }
 
-// redact keeps scheme, host and path, and drops any credentials and query
+// Redact keeps scheme, host and path, and drops any credentials and query
 // string from a URL in an error.
-func redact(u string) string {
+func Redact(u string) string {
 	p, err := neturl.Parse(u)
 	if err != nil {
 		if i := strings.IndexByte(u, '?'); i >= 0 {

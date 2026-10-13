@@ -19,10 +19,25 @@ type Config struct {
 	AdminUser      string
 	AdminPassword  string
 	Timezone       string
+	Seeds          []SeedConnection // SIFTSTR_<SVC>_URL and _API_KEY; nil when none set
 }
 
-// Load reads the config using getenv (os.Getenv in production).
-func Load(getenv func(string) string) (Config, error) {
+// SeedConnection is an upstream connection supplied by instance config. It is
+// applied to one user's connections at startup (ARCHITECTURE.md section 13).
+type SeedConnection struct {
+	Kind   string // "miniflux", "karakeep" or "metube"
+	URL    string
+	APIKey string // empty when not set; never log it
+}
+
+// String hides the key so a %v of the config cannot print it.
+func (s SeedConnection) String() string {
+	return fmt.Sprintf("{%s %s key set: %t}", s.Kind, s.URL, s.APIKey != "")
+}
+
+// Load reads the config using getenv (os.Getenv in production). readFile is
+// os.ReadFile in production; it reads *_FILE variables.
+func Load(getenv func(string) string, readFile func(string) ([]byte, error)) (Config, error) {
 	def := func(key, fallback string) string {
 		if v := strings.TrimSpace(getenv(key)); v != "" {
 			return v
@@ -53,7 +68,71 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	c.TrustedProxies = proxies
+	seeds, err := parseSeeds(getenv, readFile)
+	if err != nil {
+		return Config{}, err
+	}
+	c.Seeds = seeds
 	return c, nil
+}
+
+// seedKinds are the connections instance config can seed, in the order they
+// are applied. hasKey is false for kinds whose secret stays UI-only.
+var seedKinds = []struct {
+	kind, prefix string
+	hasKey       bool
+}{
+	{"miniflux", "SIFTSTR_MINIFLUX", true},
+	{"karakeep", "SIFTSTR_KARAKEEP", true},
+	{"metube", "SIFTSTR_METUBE", false},
+}
+
+func parseSeeds(getenv func(string) string, readFile func(string) ([]byte, error)) ([]SeedConnection, error) {
+	var out []SeedConnection
+	for _, k := range seedKinds {
+		raw := strings.TrimSpace(getenv(k.prefix + "_URL"))
+		var key string
+		if k.hasKey {
+			var err error
+			if key, err = readKey(getenv, readFile, k.prefix+"_API_KEY"); err != nil {
+				return nil, err
+			}
+		}
+		if raw == "" {
+			if key != "" {
+				return nil, fmt.Errorf("%s_API_KEY is set but %s_URL is not", k.prefix, k.prefix)
+			}
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("%s_URL must be an http(s) URL without credentials, a query string or a fragment", k.prefix)
+		}
+		out = append(out, SeedConnection{Kind: k.kind, URL: raw, APIKey: key})
+	}
+	return out, nil
+}
+
+// readKey reads name or name_FILE. Errors name the variable, never the value.
+func readKey(getenv func(string) string, readFile func(string) ([]byte, error), name string) (string, error) {
+	val := strings.TrimSpace(getenv(name))
+	path := strings.TrimSpace(getenv(name + "_FILE"))
+	switch {
+	case val != "" && path != "":
+		return "", fmt.Errorf("set %s or %s_FILE, not both", name, name)
+	case path != "":
+		b, err := readFile(path)
+		if err != nil {
+			return "", fmt.Errorf("%s_FILE: %w", name, err)
+		}
+		v := strings.TrimSpace(string(b))
+		if v == "" {
+			return "", fmt.Errorf("%s_FILE: file is empty", name)
+		}
+		return v, nil
+	}
+	return val, nil
 }
 
 // parseTrustedProxies reads a comma-separated list of CIDRs. A bare IP

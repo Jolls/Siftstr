@@ -25,7 +25,7 @@ const (
 	// even before SessionLifetime. A phone used once a day stays signed in.
 	SessionIdleTimeout = 7 * 24 * time.Hour
 
-	minPasswordLen = 8
+	minPasswordLen = 12
 
 	loginWindow = 15 * time.Minute
 	// maxPairFailures blocks one (username, client IP) pair, so failures from

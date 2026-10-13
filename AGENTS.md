@@ -135,5 +135,5 @@ Context for the issue skills (`/evaluate-issue`, `/update-issue`, `/implement-is
 
 - Never log or echo secrets (upstream API keys, the Siftstr API key, session tokens).
 - API key auth applies to `/api/*` only. Session and CSRF protection apply to HTML routes and `/sync/actions`.
-- Instance config (`SIFTSTR_LISTEN`, `SIFTSTR_DATA_DIR`, `SIFTSTR_BASE_URL`, `SIFTSTR_SECRET_KEY`, `SIFTSTR_TRUSTED_PROXIES`, bootstrap admin) comes from env vars; see ARCHITECTURE.md §13. Commit `.env.example`, never `.env`.
+- Instance config (`SIFTSTR_LISTEN`, `SIFTSTR_DATA_DIR`, `SIFTSTR_BASE_URL`, `SIFTSTR_SECRET_KEY`, `SIFTSTR_TRUSTED_PROXIES`, bootstrap admin, seeded Miniflux/Karakeep/MeTube connections) comes from env vars; see ARCHITECTURE.md §13. Commit `.env.example`, never `.env`.
 - Per-user upstream credentials live encrypted in `connections`. Never return them from any endpoint once saved.

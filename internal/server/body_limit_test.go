@@ -129,7 +129,7 @@ func TestLoginOversizedBodyIs413AndNotEvaluated(t *testing.T) {
 		t.Fatalf("oversized login = %d, want 413", resp.StatusCode)
 	}
 	for _, ck := range resp.Cookies() {
-		if ck.Name == sessionCookie && ck.Value != "" {
+		if ck.Name == "siftstr_session" && ck.Value != "" {
 			t.Fatal("oversized login started a session")
 		}
 	}

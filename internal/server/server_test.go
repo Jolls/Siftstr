@@ -156,7 +156,7 @@ func TestLoginFlow(t *testing.T) {
 	}
 	var sc *http.Cookie
 	for _, ck := range resp.Cookies() {
-		if ck.Name == sessionCookie {
+		if ck.Name == "__Host-siftstr_session" {
 			sc = ck
 		}
 	}
@@ -309,7 +309,7 @@ func TestAPIAndSessionAuthAreSeparate(t *testing.T) {
 	_, secret, _ := e.auth.CreateAPIKey(ctx, u.ID, "")
 	token, _, _ := e.auth.NewSession(ctx, u.ID)
 
-	cookie := &http.Cookie{Name: sessionCookie, Value: token}
+	cookie := &http.Cookie{Name: "siftstr_session", Value: token}
 	if resp := apiGet(t, e, "", cookie); resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("session cookie on /api = %d", resp.StatusCode)
 	}
@@ -413,5 +413,109 @@ func TestCSPBlocksInlineStyles(t *testing.T) {
 	csp := resp.Header.Get("Content-Security-Policy")
 	if !strings.Contains(csp, "default-src 'self'") || strings.Contains(csp, "unsafe-inline") {
 		t.Errorf("CSP = %q", csp)
+	}
+}
+
+func cookieByName(resp *http.Response, name string) *http.Cookie {
+	for _, ck := range resp.Cookies() {
+		if ck.Name == name {
+			return ck
+		}
+	}
+	return nil
+}
+
+func TestCookieNamesUnprefixedWhenNotSecure(t *testing.T) {
+	e := setup(t, nil, false)
+	_, _ = e.auth.CreateUser(context.Background(), "alice", "password-one", auth.RoleUser)
+	c := e.client()
+	resp, _ := c.Get(e.srv.URL + "/login")
+	if lc := cookieByName(resp, "siftstr_login"); lc == nil || lc.Secure {
+		t.Fatalf("login cookie = %+v", lc)
+	}
+	_ = e.body(t, resp)
+	resp = e.login(t, c, "alice", "password-one")
+	if sc := cookieByName(resp, "siftstr_session"); sc == nil || sc.Secure {
+		t.Fatalf("session cookie = %+v", sc)
+	}
+	for _, ck := range resp.Cookies() {
+		if strings.HasPrefix(ck.Name, "__Host-") {
+			t.Errorf("unexpected prefixed cookie %q", ck.Name)
+		}
+	}
+}
+
+func TestLoginCookiePathIsRoot(t *testing.T) {
+	e := setup(t, nil, false)
+	resp, _ := e.client().Get(e.srv.URL + "/login")
+	lc := cookieByName(resp, "siftstr_login")
+	if lc == nil || lc.Path != "/" {
+		t.Fatalf("login cookie = %+v", lc)
+	}
+}
+
+func TestHostPrefixedCookiesWhenSecure(t *testing.T) {
+	e := setup(t, nil, true)
+	_, _ = e.auth.CreateUser(context.Background(), "alice", "password-one", auth.RoleUser)
+	resp, _ := http.Get(e.srv.URL + "/login")
+	body := e.body(t, resp)
+	lc := cookieByName(resp, "__Host-siftstr_login")
+	if lc == nil || !lc.Secure || lc.Path != "/" || lc.Domain != "" {
+		t.Fatalf("login cookie = %+v", lc)
+	}
+	m := csrfRe.FindStringSubmatch(body)
+	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/login", strings.NewReader(url.Values{"csrf": {m[1]}, "username": {"alice"}, "password": {"password-one"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(lc)
+	resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+	if err != nil || resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login = %v %v", resp, err)
+	}
+	sc := cookieByName(resp, "__Host-siftstr_session")
+	if sc == nil || !sc.Secure || !sc.HttpOnly || sc.SameSite != http.SameSiteLaxMode || sc.Path != "/" || sc.Domain != "" {
+		t.Fatalf("session cookie = %+v", sc)
+	}
+	if cl := cookieByName(resp, "__Host-siftstr_login"); cl == nil || cl.MaxAge >= 0 || cl.Path != "/" {
+		t.Fatalf("login cookie not cleared: %+v", cl)
+	}
+	for _, n := range []string{"siftstr_session", "siftstr_login"} {
+		if cookieByName(resp, n) != nil {
+			t.Errorf("unprefixed cookie %q set", n)
+		}
+	}
+}
+
+func TestUnprefixedSessionCookieIgnoredWhenSecure(t *testing.T) {
+	e := setup(t, nil, true)
+	u, _ := e.auth.CreateUser(context.Background(), "alice", "password-one", auth.RoleUser)
+	token, _, err := e.auth.NewSession(context.Background(), u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(name string) *http.Response {
+		req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/today", nil)
+		req.AddCookie(&http.Cookie{Name: name, Value: token})
+		resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	if resp := get("siftstr_session"); resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("unprefixed = %d", resp.StatusCode)
+	}
+	if resp := get("__Host-siftstr_session"); resp.StatusCode != http.StatusOK {
+		t.Errorf("prefixed = %d", resp.StatusCode)
+	}
+}
+
+func TestCSPHasBaseURIAndObjectSrc(t *testing.T) {
+	e := setup(t, nil, false)
+	want := "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
+	for _, p := range []string{"/login", "/healthz"} {
+		resp, _ := http.Get(e.srv.URL + p)
+		if got := resp.Header.Get("Content-Security-Policy"); got != want {
+			t.Errorf("%s CSP = %q", p, got)
+		}
 	}
 }

@@ -26,7 +26,8 @@
       <p>{{.Help}}</p>
     </hgroup>
     <label>Base URL
-      <input type="url" name="base_url" value="{{.BaseURL}}" placeholder="https://example.com" required autocomplete="off">
+      <input type="url" name="base_url" value="{{.BaseURL}}" placeholder="https://example.com" required autocomplete="off"{{if .PlainHTTPPublic}} aria-describedby="plain-http-{{.Kind}}"{{end}}>
+      {{if .PlainHTTPPublic}}<small id="plain-http-{{.Kind}}" class="plain-http-hint">This is plain http:// to an address that may be public, so the {{.SecretLabel}} and everything sent to it travel unencrypted. Use https:// unless this address is reachable only on your own network.</small>{{end}}
     </label>
     <label>{{.SecretLabel}}
       <input type="password" name="secret" autocomplete="new-password" placeholder="{{if .HasSecret}}Saved. Enter a new one to replace it.{{end}}">
@@ -35,6 +36,11 @@
     <button type="submit">{{if .Connected}}Save{{else}}Connect{{end}}</button>
   </form>
   {{if .Connected}}
+  <p class="conn-status" data-state="{{.Status}}"><strong>{{.StatusLabel}}</strong>{{if .StatusHelp}} {{.StatusHelp}}{{end}}{{if .StatusDetail}} <small>({{.StatusDetail}})</small>{{end}}{{if .StatusWhen}}<br><small>Last checked {{.StatusWhen}}, {{.StatusVia}}.</small>{{end}}</p>
+  <form method="post" action="/settings/destinations/{{.Kind}}/test" class="inline">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <button type="submit" class="secondary">Test connection</button>
+  </form>
   <form method="post" action="/settings/destinations/{{.Kind}}/delete" class="inline">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <button type="submit" class="secondary outline">Disconnect</button>

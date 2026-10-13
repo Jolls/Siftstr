@@ -100,17 +100,21 @@ The admin variables only matter on the first start, when there are no users yet.
 | `SIFTSTR_BASE_URL` | none | The URL browsers and the Claude task use to reach Siftstr. Drives absolute links and the `Secure` cookie flag. Also turns on the `Strict-Transport-Security` header when it starts with `https://`. |
 | `SIFTSTR_TRUSTED_PROXIES` | none | Comma-separated CIDRs (or IPs) of your reverse proxy. Login limits then read the client IP from `X-Forwarded-For`. |
 | `SIFTSTR_SECRET_KEY` | generated | Key that encrypts saved upstream credentials. If unset, Siftstr creates `/data/secret.key`. |
-| `SIFTSTR_ADMIN_USER`, `SIFTSTR_ADMIN_PASSWORD` | none | Creates the first admin on first start. |
+| `SIFTSTR_ADMIN_USER`, `SIFTSTR_ADMIN_PASSWORD` | none | Creates the first admin on first start. The password must be at least 12 characters. |
+| `SIFTSTR_MINIFLUX_URL`, `SIFTSTR_KARAKEEP_URL`, `SIFTSTR_METUBE_URL` | none | Pre-fill that connection for the admin user. |
+| `SIFTSTR_MINIFLUX_API_KEY`, `SIFTSTR_KARAKEEP_API_KEY` (or `..._FILE`) | none | Key for the pre-filled connection, or a path to a file holding it (such as a Docker secret). Not both. |
 | `TZ` | `UTC` | Default timezone for new users. Each user can change theirs under Settings, Sources. |
 
-Everything else (connections, timers, prompts, per-source settings) is set in the app.
+Everything else (timers, prompts, per-source settings) is set in the app. Connections are too; the connection variables only pre-fill them for the admin user: the URL is re-applied on every start, a key only when none is saved.
 
 Add more users with `docker compose exec` or `docker exec`:
 
 ```sh
-printf '%s' 'a-password' | docker compose exec -T siftstr /siftstr user add alice
+printf '%s' 'a-long-password' | docker compose exec -T siftstr /siftstr user add alice
 printf '%s' 'new-password' | docker compose exec -T siftstr /siftstr user set-password alice
 ```
+
+Passwords must be at least 12 characters.
 
 ### Reverse proxy and TLS
 
@@ -118,7 +122,7 @@ The container never terminates TLS. Put Caddy, Traefik, nginx, Tailscale or simi
 
 `compose.yaml` publishes port 8080 on `127.0.0.1` only. Ports that Docker publishes bypass host firewalls such as ufw and firewalld, so an all-interfaces port would expose plain HTTP (password, session cookie, API key) even with a proxy in front. To reach Siftstr from other machines without a proxy, change the bind address on purpose.
 
-- Set `SIFTSTR_BASE_URL` to the address people actually use. The session cookie gets the `Secure` flag only when that URL starts with `https://`, and it is never inferred from the request, so behind a TLS proxy set it to your `https://` address.
+- Set `SIFTSTR_BASE_URL` to the address people actually use. The session cookie gets the `Secure` flag only when that URL starts with `https://`, and it is never inferred from the request, so behind a TLS proxy set it to your `https://` address. With an `https://` URL the cookies are named `__Host-siftstr_session` and `__Host-siftstr_login`, so after switching between `http://` and `https://` everyone signs in again.
 - Set `SIFTSTR_TRUSTED_PROXIES` to the address or subnet your proxy connects from, for example the Docker network's subnet such as `172.18.0.0/16`. Without it every login seems to come from the proxy, so 20 failed logins from anyone block logins for everyone for 15 minutes. List only addresses you control: a listed address can claim any client IP in `X-Forwarded-For`.
 - If you serve it over plain `http://` on a LAN, the cookie is not `Secure`. That works, but anyone on that network can read the traffic. Siftstr logs a warning at startup in this case.
 
@@ -131,8 +135,12 @@ Checklist:
 - `SIFTSTR_BASE_URL` is set to the `https://` address people use.
 - `SIFTSTR_TRUSTED_PROXIES` is set to the proxy's address or subnet.
 - The port is still bound to `127.0.0.1`, or is otherwise reachable only through the proxy.
+- The admin password is at least 12 characters and not used anywhere else.
+- Upstream connections on another host (Miniflux, Karakeep, MeTube) use `https://`. Settings → Destinations shows a hint for a plain `http://` address that may be public.
 
 At startup Siftstr logs a warning when `SIFTSTR_BASE_URL` is not `https://`. With an `https://` value it sends `Strict-Transport-Security: max-age=31536000`.
+
+Any signed-in user can point a connection or Nostr relay at an address on your internal network and see the connection error. That is fine with trusted users only; see ARCHITECTURE.md §12, Known limitations.
 
 The same URL is what the Claude task calls, so it has to be reachable from where the task runs. See [docs/scheduled-task.md](docs/scheduled-task.md).
 
@@ -153,7 +161,7 @@ Put the CA certificate in `./certs` as a `.crt` or `.pem` file.
 
 ## Set up
 
-1. Log in, then open **Settings, Destinations** and add your Miniflux connection (and Karakeep and MeTube if you use them).
+1. Log in, then open **Settings, Destinations** and add your Miniflux connection (and Karakeep and MeTube if you use them), skipping any that instance config already filled in.
 2. Open **Settings, Sources**. Your Miniflux feeds appear after the first ingest (it runs every 30 minutes, and once at start-up). Set granularity, max depth and carryover per source.
 3. For Nostr, add relays and followed npubs under **Settings, Nostr**.
 4. Create the Claude scheduled task: [docs/scheduled-task.md](docs/scheduled-task.md).

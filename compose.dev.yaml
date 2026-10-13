@@ -8,11 +8,11 @@ services:
   siftstr:
     build: .
     ports:
-      # Localhost only: the dev login is admin/admin123.
+      # Localhost only: the dev login is admin/adminpassword.
       - "127.0.0.1:8081:8080"
     environment:
       SIFTSTR_ADMIN_USER: admin
-      SIFTSTR_ADMIN_PASSWORD: admin123
+      SIFTSTR_ADMIN_PASSWORD: adminpassword
       # Plain http on localhost: no BASE_URL, so cookies are not Secure.
       TZ: ${TZ:-UTC}
     volumes:
