@@ -402,3 +402,16 @@ func TestLogoutEndsOnlyThatSession(t *testing.T) {
 		t.Errorf("c2 /today = %d", resp.StatusCode)
 	}
 }
+
+// Characterization (#36): inline styles are blocked, which is why accents live in a static file.
+func TestCSPBlocksInlineStyles(t *testing.T) {
+	e := setup(t, nil, false)
+	resp, err := http.Get(e.srv.URL + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	csp := resp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "default-src 'self'") || strings.Contains(csp, "unsafe-inline") {
+		t.Errorf("CSP = %q", csp)
+	}
+}

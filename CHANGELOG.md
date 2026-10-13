@@ -4,9 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.5] - 2026-10-12
+## [0.2.6] - 2026-10-12
 ### Added
 - Karakeep highlights: an opt-in setting on Settings → Sources puts one of your Karakeep highlights, with its note and a link to the bookmark, first under Today in the briefing and on `/read`. Siftstr reads your highlights when it starts and then weekly, and shows a different one each day until it has shown them all ([#34](https://github.com/Jolls/Siftstr/issues/34))
+
+## [0.2.5] - 2026-10-12
+### Added
+- Settings → Appearance: choose an accent color for buttons, links and focus rings from 16 Pico color families (jade stays the default). It applies on every signed-in page and device; the sign-in page stays jade ([#36](https://github.com/Jolls/Siftstr/issues/36))
+### Changed
+- The Theme and list-direction settings moved from the Sources settings page to Appearance ([#36](https://github.com/Jolls/Siftstr/issues/36))
+- In dark mode a primary button's hover color is a darker shade, so its text keeps 4.5:1 contrast ([#36](https://github.com/Jolls/Siftstr/issues/36))
+- The badge on a triaged card is colored by status: deleted red, archived grey, promoted light green, kept light blue, with light and dark values that meet WCAG AA contrast. The badge is no longer dimmed with the rest of the card ([#31](https://github.com/Jolls/Siftstr/issues/31))
 
 ## [0.2.4] - 2026-10-12
 ### Added

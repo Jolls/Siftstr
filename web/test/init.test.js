@@ -17,7 +17,7 @@ function el(attrs, parts) {
 
 function page() {
   const parts = {
-    "[data-badge]": { hidden: true, textContent: "" },
+    "[data-badge]": { hidden: true, textContent: "", dataset: {} },
     '[data-action="undo"]': { hidden: true },
     '[data-action="promote"]': { hidden: false },
     "[data-notice]": { hidden: true, textContent: "" },
@@ -102,4 +102,27 @@ test("undo puts the card, and its Promote button, back as they were", () => {
   tap(p, "undo");
   assert.equal(p.card.dataset.state, "light");
   assert.equal(p.parts['[data-action="promote"]'].hidden, false);
+});
+
+test("badge color hook follows the word", () => {
+  const p = page();
+  const badgeEl = p.parts["[data-badge]"];
+  tap(p, "archive");
+  assert.equal(badgeEl.dataset.badge, "deleted");
+  press(p, "z");
+  assert.equal(badgeEl.dataset.badge, "");
+
+  const q = page();
+  q.card.dataset.state = "deep";
+  q.card.dataset.promoted = "true";
+  tap(q, "archive");
+  assert.equal(q.parts["[data-badge]"].dataset.badge, "archived");
+
+  const k = page();
+  tap(k, "keep");
+  assert.equal(k.parts["[data-badge]"].dataset.badge, "kept");
+
+  const r = page();
+  tap(r, "promote");
+  assert.equal(r.parts["[data-badge]"].dataset.badge, "promoted");
 });

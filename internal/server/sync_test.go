@@ -194,4 +194,7 @@ func TestTodayAndBacklogShowItemsAndActions(t *testing.T) {
 		!strings.Contains(page, `>kept</span>`) || !strings.Contains(page, `data-undo-action="a1"`) {
 		t.Fatalf("after keep: %s", page)
 	}
+	if !strings.Contains(page, `data-badge="kept"`) {
+		t.Fatalf("kept badge carries no color hook: %s", page)
+	}
 }

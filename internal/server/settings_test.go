@@ -4,8 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/Jolls/Siftstr/internal/triage"
+	"github.com/Jolls/Siftstr/web"
 )
 
 // signedIn creates a user, logs in and returns the client and its CSRF token.
@@ -287,7 +291,7 @@ func TestPhoneFlowSetting(t *testing.T) {
 	if !strings.Contains(body, `data-flow="up"`) {
 		t.Fatal("default is not bottom-up")
 	}
-	_, body = e.get(t, c, "/settings/sources")
+	_, body = e.get(t, c, "/settings/appearance")
 	if !strings.Contains(body, `value="up" checked`) {
 		t.Fatal("settings page does not show bottom-up as chosen")
 	}
@@ -307,7 +311,7 @@ func TestPhoneFlowSetting(t *testing.T) {
 }
 
 var themedPages = []string{"/today", "/backlog", "/read", "/settings/sources", "/settings/prompts",
-	"/settings/keys", "/settings/activity", "/settings/nostr", "/settings/destinations"}
+	"/settings/keys", "/settings/activity", "/settings/nostr", "/settings/destinations", "/settings/appearance"}
 
 func TestPagesFollowOSWithNoThemeSaved(t *testing.T) {
 	e := setup(t, nil, false)
@@ -326,7 +330,7 @@ func TestThemeSetting(t *testing.T) {
 	e := setup(t, nil, false)
 	c, csrf := e.signedIn(t, "alice")
 	c2, _ := e.signedIn(t, "bob")
-	if _, body := e.get(t, c, "/settings/sources"); !strings.Contains(body, `name="theme" value="auto" checked`) {
+	if _, body := e.get(t, c, "/settings/appearance"); !strings.Contains(body, `name="theme" value="auto" checked`) {
 		t.Fatal("settings page does not show auto as chosen")
 	}
 	save := func(v url.Values) *http.Response { return e.post(t, c, "/settings/theme", v) }
@@ -334,7 +338,7 @@ func TestThemeSetting(t *testing.T) {
 		t.Fatalf("no csrf = %d", resp.StatusCode)
 	}
 	resp := save(url.Values{"csrf": {csrf}, "theme": {"dark"}})
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/settings/sources?notice=saved" {
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/settings/appearance?notice=saved" {
 		t.Fatalf("save = %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	for _, p := range themedPages {
@@ -342,7 +346,7 @@ func TestThemeSetting(t *testing.T) {
 			t.Errorf("%s is not dark", p)
 		}
 	}
-	if _, body := e.get(t, c, "/settings/sources"); !strings.Contains(body, `name="theme" value="dark" checked`) {
+	if _, body := e.get(t, c, "/settings/appearance"); !strings.Contains(body, `name="theme" value="dark" checked`) {
 		t.Error("settings page does not show dark as chosen")
 	}
 	// Another user keeps the default, and so does the login page.
@@ -381,5 +385,179 @@ func TestThemeSetting(t *testing.T) {
 	save(url.Values{"csrf": {csrf}, "theme": {"auto"}})
 	if _, body := e.get(t, c, "/today"); strings.Contains(body, "data-theme") || !strings.Contains(body, `content="light dark"`) {
 		t.Error("auto did not clear the theme")
+	}
+}
+
+// Characterization (#36): moving Theme and list direction must leave the other Sources forms in place.
+func TestSourcesPageKeepsOtherForms(t *testing.T) {
+	e := setup(t, nil, false)
+	c, _ := e.signedIn(t, "alice")
+	_, body := e.get(t, c, "/settings/sources")
+	for _, want := range []string{`action="/settings/timezone"`, `action="/settings/ingest"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Sources lost %s", want)
+		}
+	}
+}
+
+func TestAppearancePage(t *testing.T) {
+	e := setup(t, nil, false)
+	if resp, err := e.client().Get(e.srv.URL + "/settings/appearance"); err != nil || resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" {
+		t.Fatalf("signed out = %v %v", resp, err)
+	}
+	c, _ := e.signedIn(t, "alice")
+	code, body := e.get(t, c, "/settings/appearance")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	for _, want := range []string{
+		`<h1>Appearance</h1>`, `action="/settings/theme"`, `action="/settings/accent"`, `action="/settings/display"`,
+		`name="theme" value="auto" checked`, `name="accent" value="jade" checked`, `value="up" checked`,
+		`href="/settings/appearance" aria-current="page"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if n := strings.Count(body, `name="accent"`); n != 16 {
+		t.Errorf("%d accent radios, want 16", n)
+	}
+	if strings.Contains(body, `value="slate"`) {
+		t.Error("neutrals are not offered")
+	}
+}
+
+func TestThemeAndFlowMovedToAppearance(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	_, body := e.get(t, c, "/settings/sources")
+	if strings.Contains(body, `name="theme"`) || strings.Contains(body, `name="phone_flow"`) {
+		t.Error("Sources still has the theme or list direction form")
+	}
+	for path, v := range map[string]url.Values{
+		"/settings/theme":   {"csrf": {csrf}, "theme": {"dark"}},
+		"/settings/display": {"csrf": {csrf}, "phone_flow": {"down"}},
+	} {
+		resp := e.post(t, c, path, v)
+		if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/settings/appearance?notice=saved" {
+			t.Errorf("%s = %d %s", path, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+	for path, v := range map[string]url.Values{
+		"/settings/theme":   {"csrf": {csrf}, "theme": {"sepia"}},
+		"/settings/display": {"csrf": {csrf}, "phone_flow": {"sideways"}},
+	} {
+		resp := e.post(t, c, path, v)
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(e.body(t, resp), `<h1>Appearance</h1>`) {
+			t.Errorf("bad %s is not the Appearance page with 422", path)
+		}
+	}
+}
+
+func TestAccentSetting(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	if resp := e.post(t, c, "/settings/accent", url.Values{"accent": {"red"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("no csrf = %d", resp.StatusCode)
+	}
+	resp := e.post(t, c, "/settings/accent", url.Values{"csrf": {csrf}, "accent": {"red"}})
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/settings/appearance?notice=saved" {
+		t.Fatalf("save = %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	for _, p := range themedPages {
+		if _, body := e.get(t, c, p); !strings.Contains(body, `<html lang="en" data-accent="red">`) {
+			t.Errorf("%s has no red accent", p)
+		}
+	}
+	if _, body := e.get(t, c, "/settings/appearance"); !strings.Contains(body, `name="accent" value="red" checked`) {
+		t.Error("Appearance does not show red as chosen")
+	}
+	if resp := e.post(t, c, "/settings/theme", url.Values{"csrf": {csrf}, "theme": {"dark"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("theme = %d", resp.StatusCode)
+	}
+	if _, body := e.get(t, c, "/today"); !strings.Contains(body, `<html lang="en" data-theme="dark" data-accent="red">`) {
+		t.Error("theme and accent should both render")
+	}
+	c2 := e.client()
+	if resp := e.login(t, c2, "alice", "correct horse battery"); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login = %d", resp.StatusCode)
+	}
+	if _, body := e.get(t, c2, "/today"); !strings.Contains(body, `data-accent="red"`) {
+		t.Error("accent did not persist to a new session")
+	}
+	if resp := e.post(t, c, "/settings/accent", url.Values{"csrf": {csrf}, "accent": {"jade"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("jade = %d", resp.StatusCode)
+	}
+	if _, body := e.get(t, c, "/today"); strings.Contains(body, "data-accent") {
+		t.Error("jade renders no data-accent")
+	}
+}
+
+func TestAccentIsolation(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	c2, _ := e.signedIn(t, "bob")
+	if resp := e.post(t, c, "/settings/accent", url.Values{"csrf": {csrf}, "accent": {"red"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	for _, p := range []string{"/today", "/settings/appearance"} {
+		if _, body := e.get(t, c2, p); strings.Contains(body, `<html lang="en" data-accent`) {
+			t.Errorf("alice's accent leaked to bob on %s", p)
+		}
+	}
+	if _, body := e.get(t, c2, "/settings/appearance"); !strings.Contains(body, `name="accent" value="jade" checked`) {
+		t.Error("bob's Appearance should show jade chosen")
+	}
+	if _, body := e.get(t, e.client(), "/login"); strings.Contains(body, "data-accent") {
+		t.Error("login should always be jade")
+	}
+	var n int
+	if err := e.st.DB().QueryRow(`SELECT COUNT(*) FROM user_settings s JOIN users u ON u.id = s.user_id WHERE u.username = 'bob' AND s.key = 'accent'`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("bob has %d accent rows (%v)", n, err)
+	}
+}
+
+func TestAccentRejectsUnknown(t *testing.T) {
+	e := setup(t, nil, false)
+	c, csrf := e.signedIn(t, "alice")
+	if resp := e.post(t, c, "/settings/accent", url.Values{"csrf": {csrf}, "accent": {"red"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save = %d", resp.StatusCode)
+	}
+	for _, v := range []url.Values{
+		{"csrf": {csrf}, "accent": {"neon"}}, {"csrf": {csrf}, "accent": {""}}, {"csrf": {csrf}, "accent": {"Red"}},
+		{"csrf": {csrf}, "accent": {"slate"}}, {"csrf": {csrf}, "accent": {`red"x`}}, {"csrf": {csrf}},
+	} {
+		resp := e.post(t, c, "/settings/accent", v)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("bad value %v = %d", v, resp.StatusCode)
+		}
+		body := e.body(t, resp)
+		for _, want := range []string{"accent is not one of the offered colors.", `<h1>Appearance</h1>`, `data-accent="red"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%v: 422 page lacks %q", v, want)
+			}
+		}
+	}
+	if _, body := e.get(t, c, "/settings/appearance"); !strings.Contains(body, `name="accent" value="red" checked`) {
+		t.Error("a rejected value changed the saved accent")
+	}
+}
+
+func TestAccentListMatchesCSS(t *testing.T) {
+	b, err := web.FS.ReadFile("static/accents.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\[data-accent="([a-z]+)"\]\s*\{`).FindAllStringSubmatch(string(b), -1) {
+		got[m[1]] = true
+	}
+	if len(triage.Accents) != 16 || len(got) != len(triage.Accents) {
+		t.Fatalf("%d accents in Go, %d in CSS", len(triage.Accents), len(got))
+	}
+	for _, a := range triage.Accents {
+		if !got[a] {
+			t.Errorf("accents.css has no block for %s", a)
+		}
 	}
 }

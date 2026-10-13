@@ -61,10 +61,6 @@ func (s *server) renderSources(w http.ResponseWriter, req *http.Request, sess *s
 		serverError(w)
 		return
 	}
-	if p.PhoneFlow, err = s.Triage.PhoneFlow(req.Context(), sess.User.ID); err != nil {
-		serverError(w)
-		return
-	}
 	for _, g := range runs.ZoneGroups(p.Timezone) {
 		p.ZoneGroups = append(p.ZoneGroups, ui.ZoneGroup{Region: g.Region, Zones: g.Zones})
 	}
@@ -327,28 +323,49 @@ func (s *server) timezoneSave(w http.ResponseWriter, req *http.Request, sess *se
 	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
 }
 
-func (s *server) displaySave(w http.ResponseWriter, req *http.Request, sess *session) {
-	if err := s.Triage.SetPhoneFlow(req.Context(), sess.User.ID, req.PostFormValue("phone_flow")); err != nil {
-		if errors.Is(err, triage.ErrBadFlow) {
-			s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
-			return
-		}
+func (s *server) appearanceForm(w http.ResponseWriter, req *http.Request, sess *session) {
+	s.renderAppearance(w, req, sess, http.StatusOK, "")
+}
+
+// renderAppearance shows the display settings: list direction, theme and accent.
+func (s *server) renderAppearance(w http.ResponseWriter, req *http.Request, sess *session, status int, msg string) {
+	p := s.settingsPage(sess, req, "Appearance")
+	p.Error = msg
+	var err error
+	if p.PhoneFlow, err = s.Triage.PhoneFlow(req.Context(), sess.User.ID); err != nil {
 		serverError(w)
 		return
 	}
-	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+	for _, a := range triage.Accents {
+		p.AccentOptions = append(p.AccentOptions, ui.AccentOption{Value: a, Label: strings.ToUpper(a[:1]) + a[1:]})
+	}
+	s.ui.Render(w, status, "settings_appearance", p)
+}
+
+func (s *server) displaySave(w http.ResponseWriter, req *http.Request, sess *session) {
+	s.saveAppearance(w, req, sess, s.Triage.SetPhoneFlow(req.Context(), sess.User.ID, req.PostFormValue("phone_flow")), triage.ErrBadFlow)
 }
 
 func (s *server) themeSave(w http.ResponseWriter, req *http.Request, sess *session) {
-	if err := s.Triage.SetTheme(req.Context(), sess.User.ID, req.PostFormValue("theme")); err != nil {
-		if errors.Is(err, triage.ErrBadTheme) {
-			s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
-			return
-		}
+	s.saveAppearance(w, req, sess, s.Triage.SetTheme(req.Context(), sess.User.ID, req.PostFormValue("theme")), triage.ErrBadTheme)
+}
+
+func (s *server) accentSave(w http.ResponseWriter, req *http.Request, sess *session) {
+	s.saveAppearance(w, req, sess, s.Triage.SetAccent(req.Context(), sess.User.ID, req.PostFormValue("accent")), triage.ErrBadAccent)
+}
+
+// saveAppearance finishes an Appearance form post: err is the setter's result and bad its
+// "not an allowed value" error, which re-renders the page with a 422.
+func (s *server) saveAppearance(w http.ResponseWriter, req *http.Request, sess *session, err, bad error) {
+	if errors.Is(err, bad) {
+		s.renderAppearance(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
+		return
+	}
+	if err != nil {
 		serverError(w)
 		return
 	}
-	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+	http.Redirect(w, req, "/settings/appearance?notice=saved", http.StatusSeeOther)
 }
 
 func (s *server) activityForm(w http.ResponseWriter, req *http.Request, sess *session) {

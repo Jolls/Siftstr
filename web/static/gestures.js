@@ -17,6 +17,7 @@
   // badge is the word an actioned card shows, the same as server.go. Both
   // swipe-left outcomes are stored as "archived" (ARCHITECTURE.md Q28): it
   // reads "archived" on a card that was promoted first and "deleted" otherwise.
+  // The word is also the data-badge color hook (app.css).
   function badge(state, promoted) {
     if (state === "archived") return promoted ? "archived" : "deleted";
     if (state === "kept") return "kept";
@@ -124,6 +125,7 @@
       var badgeEl = el.querySelector("[data-badge]");
       var text = badge(c.state, c.promoted);
       badgeEl.textContent = text;
+      badgeEl.dataset.badge = text;
       badgeEl.hidden = text === "";
       var undo = el.querySelector('[data-action="undo"]');
       if (undo) undo.hidden = c.undoID === "";
