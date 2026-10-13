@@ -35,5 +35,5 @@ fi
 
 echo "These files affect behavior but CHANGELOG.md was not updated:"
 printf '  %s\n' $needs
-echo "Add an entry under [Unreleased] in CHANGELOG.md, or add the skip-changelog label."
+echo "Add a new version entry at the top of CHANGELOG.md, or add the skip-changelog label."
 exit 1
