@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Jolls/Siftstr/internal/config"
 )
 
 func TestReadPassword(t *testing.T) {
@@ -112,5 +114,16 @@ func TestNewHTTPServerTimeouts(t *testing.T) {
 	srv := newHTTPServer(":0", http.NewServeMux())
 	if srv.ReadHeaderTimeout != 10*time.Second || srv.ReadTimeout != 60*time.Second || srv.WriteTimeout != 60*time.Second || srv.IdleTimeout != 120*time.Second {
 		t.Fatalf("timeouts = header %v read %v write %v idle %v", srv.ReadHeaderTimeout, srv.ReadTimeout, srv.WriteTimeout, srv.IdleTimeout)
+	}
+}
+
+func TestBaseURLWarning(t *testing.T) {
+	for _, u := range []string{"", "http://192.168.1.20:8080"} {
+		if w := baseURLWarning(config.Config{BaseURL: u}); !strings.Contains(w, "SIFTSTR_BASE_URL is not https") {
+			t.Errorf("%q: warning = %q", u, w)
+		}
+	}
+	if w := baseURLWarning(config.Config{BaseURL: "https://siftstr.example.com"}); w != "" {
+		t.Errorf("https: warning = %q, want none", w)
 	}
 }

@@ -43,6 +43,10 @@ func Load(getenv func(string) string) (Config, error) {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return Config{}, fmt.Errorf("SIFTSTR_BASE_URL must be an http(s) URL")
 		}
+		// url.Parse accepts HTTPS://; keep the stored scheme lowercase so the
+		// https:// prefix check in SecureCookies sees it.
+		u.Scheme = strings.ToLower(u.Scheme)
+		c.BaseURL = u.String()
 	}
 	proxies, err := parseTrustedProxies(getenv("SIFTSTR_TRUSTED_PROXIES"))
 	if err != nil {

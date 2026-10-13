@@ -58,3 +58,18 @@ func TestTrustedProxies(t *testing.T) {
 		}
 	}
 }
+
+func TestSecureCookiesByScheme(t *testing.T) {
+	for in, want := range map[string]bool{
+		"":                             false,
+		"http://192.168.1.20:8080":     false,
+		"https://siftstr.example.com":  true,
+		"https://siftstr.example.com/": true,
+		"HTTPS://siftstr.example.com":  true,
+	} {
+		c, err := Load(env(map[string]string{"SIFTSTR_BASE_URL": in}))
+		if err != nil || c.SecureCookies() != want {
+			t.Errorf("%q: SecureCookies=%v err=%v, want %v", in, c.SecureCookies(), err, want)
+		}
+	}
+}

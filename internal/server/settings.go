@@ -426,6 +426,39 @@ func (s *server) renderKeys(w http.ResponseWriter, req *http.Request, sess *sess
 	s.ui.Render(w, status, "settings_keys", p)
 }
 
+// sessionsForm lists the user's active sessions and offers Sign out everywhere.
+func (s *server) sessionsForm(w http.ResponseWriter, req *http.Request, sess *session) {
+	list, err := s.Auth.ListSessions(req.Context(), sess.User.ID, sess.Token)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	loc, err := time.LoadLocation(sess.User.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	show := func(t time.Time) string { return t.In(loc).Format("2006-01-02 15:04") }
+	p := s.settingsPage(sess, req, "Sessions")
+	p.IdleDays = int(auth.SessionIdleTimeout / (24 * time.Hour))
+	p.LifetimeDays = int(auth.SessionLifetime / (24 * time.Hour))
+	for _, x := range list {
+		p.Sessions = append(p.Sessions, ui.SessionRow{Created: show(x.CreatedAt), LastSeen: show(x.LastSeenAt), Expires: show(x.ExpiresAt), Current: x.Current})
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.ui.Render(w, http.StatusOK, "settings_sessions", p)
+}
+
+// sessionsEndAll ends every session of the user, including this one.
+func (s *server) sessionsEndAll(w http.ResponseWriter, req *http.Request, sess *session) {
+	if _, err := s.Auth.EndAllSessions(req.Context(), sess.User.ID); err != nil {
+		serverError(w)
+		return
+	}
+	_, _ = s.newKeys.take(sess.Token)
+	s.clearCookie(w, sessionCookie)
+	http.Redirect(w, req, "/login", http.StatusSeeOther)
+}
+
 func (s *server) keyCreate(w http.ResponseWriter, req *http.Request, sess *session) {
 	label := strings.TrimSpace(req.PostFormValue("label"))
 	if utf8.RuneCountInString(label) > 80 {

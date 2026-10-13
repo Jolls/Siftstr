@@ -21,6 +21,10 @@ const (
 	// SessionLifetime is long so an expiring session mid-triage is rare.
 	SessionLifetime = 30 * 24 * time.Hour
 
+	// SessionIdleTimeout ends a session that has not been used for this long,
+	// even before SessionLifetime. A phone used once a day stays signed in.
+	SessionIdleTimeout = 7 * 24 * time.Hour
+
 	minPasswordLen = 8
 
 	loginWindow = 15 * time.Minute
@@ -348,8 +352,9 @@ func (s *Service) NewSession(ctx context.Context, userID string) (string, time.T
 	return token, expires, nil
 }
 
-// UserForSession resolves a cookie token to its user. Expired sessions and
-// disabled users yield ErrNoSession.
+// UserForSession resolves a cookie token to its user. Expired sessions,
+// sessions unused for SessionIdleTimeout, and disabled users yield
+// ErrNoSession.
 func (s *Service) UserForSession(ctx context.Context, token string) (User, error) {
 	if token == "" {
 		return User{}, ErrNoSession
@@ -357,25 +362,76 @@ func (s *Service) UserForSession(ctx context.Context, token string) (User, error
 	var (
 		u        User
 		expires  string
+		lastSeen string
 		disabled bool
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT u.id, u.username, u.role, u.timezone, u.disabled, s.expires_at
+		`SELECT u.id, u.username, u.role, u.timezone, u.disabled, s.expires_at, s.last_seen_at
 		   FROM sessions s JOIN users u ON u.id = s.user_id
 		  WHERE s.id = ?`, hashToken(token)).
-		Scan(&u.ID, &u.Username, &u.Role, &u.Timezone, &disabled, &expires)
+		Scan(&u.ID, &u.Username, &u.Role, &u.Timezone, &disabled, &expires, &lastSeen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNoSession
 	}
 	if err != nil {
 		return User{}, err
 	}
+	now := s.now()
 	exp, perr := time.Parse(time.RFC3339, expires)
-	if perr != nil || !s.now().Before(exp) || disabled {
+	seen, serr := time.Parse(time.RFC3339, lastSeen)
+	if perr != nil || serr != nil || !now.Before(exp) || !now.Before(seen.Add(SessionIdleTimeout)) || disabled {
 		return User{}, ErrNoSession
 	}
 	_, _ = s.db.ExecContext(ctx, `UPDATE sessions SET last_seen_at = ? WHERE id = ?`, s.stamp(), hashToken(token))
 	return u, nil
+}
+
+// EndAllSessions deletes every session of userID, including the caller's,
+// and reports how many it ended.
+func (s *Service) EndAllSessions(ctx context.Context, userID string) (int64, error) {
+	if userID == "" {
+		return 0, errors.New("auth: user ID required")
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("end sessions: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// Session describes one of a user's active sessions. It never carries the
+// token or its hash.
+type Session struct {
+	CreatedAt, LastSeenAt, ExpiresAt time.Time
+	Current                          bool // the session whose token was passed in
+}
+
+// ListSessions returns userID's sessions that are neither expired nor idle,
+// most recently seen first. currentToken marks the caller's own session.
+func (s *Service) ListSessions(ctx context.Context, userID, currentToken string) ([]Session, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, created_at, last_seen_at, expires_at FROM sessions
+		  WHERE user_id = ? AND expires_at > ? AND last_seen_at > ?
+		  ORDER BY last_seen_at DESC, created_at DESC`,
+		userID, s.stamp(), s.now().Add(-SessionIdleTimeout).UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+	cur := hashToken(currentToken)
+	var out []Session
+	for rows.Next() {
+		var id, created, seen, exp string
+		if err := rows.Scan(&id, &created, &seen, &exp); err != nil {
+			return nil, err
+		}
+		ss := Session{Current: id == cur}
+		ss.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		ss.LastSeenAt, _ = time.Parse(time.RFC3339, seen)
+		ss.ExpiresAt, _ = time.Parse(time.RFC3339, exp)
+		out = append(out, ss)
+	}
+	return out, rows.Err()
 }
 
 // EndSession deletes the session for token, if any.

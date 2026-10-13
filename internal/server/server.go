@@ -52,8 +52,8 @@ type Deps struct {
 	Briefing *briefing.Service
 	// Outbox backs the Activity page and the alert for stopped entries.
 	Outbox *outbox.Log
-	// SecureCookies sets the Secure flag. It comes from SIFTSTR_BASE_URL, not
-	// from r.TLS, because TLS ends at the reverse proxy.
+	// SecureCookies sets the Secure flag and turns on the HSTS header. It comes
+	// from SIFTSTR_BASE_URL, not from r.TLS, because TLS ends at the reverse proxy.
 	SecureCookies bool
 	// TrustedProxies comes from SIFTSTR_TRUSTED_PROXIES. Only a request whose
 	// peer address is inside one of them has its client IP read from
@@ -117,6 +117,8 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /settings/keys", s.protected(s.keysForm))
 	mux.HandleFunc("POST /settings/keys", s.protected(s.keyCreate))
 	mux.HandleFunc("POST /settings/keys/{id}/revoke", s.protected(s.keyRevoke))
+	mux.HandleFunc("GET /settings/sessions", s.protected(s.sessionsForm))
+	mux.HandleFunc("POST /settings/sessions/end-all", s.protected(s.sessionsEndAll))
 	mux.HandleFunc("GET /settings/activity", s.protected(s.activityForm))
 	mux.HandleFunc("POST /settings/activity/release", s.protected(s.activityReleaseNow))
 	mux.HandleFunc("POST /settings/activity/{id}/retry", s.protected(s.activityRetry))
@@ -128,7 +130,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("POST /settings/destinations/keep", s.protected(s.keepSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}/delete", s.protected(s.destinationDelete))
-	return secureHeaders(limitForms(mux)), nil
+	return secureHeaders(s.SecureCookies, limitForms(mux)), nil
 }
 
 func (s *server) healthz(w http.ResponseWriter, req *http.Request) {
@@ -457,12 +459,17 @@ func limitForms(next http.Handler) http.Handler {
 
 // secureHeaders sets headers that suit a plain-HTTP app behind a TLS proxy.
 // Inline scripts and styles are blocked; all JS and CSS are embedded files.
-func secureHeaders(next http.Handler) http.Handler {
+// With hsts set (BASE_URL is https) it also sends Strict-Transport-Security;
+// browsers ignore that over plain HTTP.
+func secureHeaders(hsts bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; form-action 'self'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
+		if hsts {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		next.ServeHTTP(w, req)
 	})
 }

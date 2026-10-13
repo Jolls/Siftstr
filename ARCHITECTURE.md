@@ -432,6 +432,7 @@ An item's current outcome is derived from its latest effective action. The janit
 | `/settings/sources` | Per-source settings table |
 | `/settings/prompts` | Global and per-source summarization instructions |
 | `/settings/activity` | Outbox log: stopped updates with Retry and Dismiss |
+| `/settings/sessions` | Active sessions and Sign out everywhere |
 | `/settings/destinations` | Video destinations, export target, upstream connections |
 | `/login` | Login |
 
@@ -458,9 +459,9 @@ An item's current outcome is derived from its latest effective action. The janit
 - Failed logins are limited per (username, client IP) pair: 5 failures in 15 minutes block that pair, so failures from one source cannot lock a user out everywhere. 20 failures in 15 minutes from one client IP block that IP; an IPv6 client counts as its /64. Failures for one username from every source slow its logins down instead of blocking them: from the 10th failure in 15 minutes each attempt waits 1 second, doubling per further failure up to 30 seconds. Each attempt counts before its password is checked, so concurrent attempts cannot slip past a limit, and a successful login clears its pair's count. Usernames are at most 64 bytes. Each counter holds at most 10,000 entries and drops expired ones every minute.
 - At most two password checks run at once (each argon2id check takes 64 MiB). A login that finds both busy gets `429` at once instead of waiting, and is not counted as a failure.
 - CSRF protection applies to state-changing HTML routes and `/sync/actions`.
-- **Long sessions *(proposed)*.** Make sessions long-lived so a session expiring mid-triage is rare. Queued actions survive an expired session either way.
+- **Sessions.** A session lasts at most 30 days from sign-in, and ends sooner when it goes unused for 7 days (its `last_seen_at`, updated on every request), so a device used once a day stays signed in. Settings → Sessions lists the active sessions and has **Sign out everywhere**, which ends every session of the user, including the current one (CSRF-protected). `siftstr user set-password` also ends them all. Queued actions survive a forced sign-out: they wait in the page's `localStorage` queue and are sent after the next sign-in.
 - **Bootstrap:** on first start with an empty `users` table, Siftstr creates an admin user from `SIFTSTR_ADMIN_USER` and `SIFTSTR_ADMIN_PASSWORD`. The `siftstr user add` and `siftstr user set-password` CLI commands can also create users and reset passwords, which also gives platform wrappers (such as the StartOS package) a way to set the admin password. v1 has no other user management.
-- **Behind a TLS proxy.** Inside the container every request arrives as plain HTTP, so the `Secure` cookie flag and any absolute URLs come from config (`SIFTSTR_BASE_URL`), not from `r.TLS`. Don't reject requests based on the `Host` header. The client IP for login limits is the connecting address unless that address is inside `SIFTSTR_TRUSTED_PROXIES`; then it is read from `X-Forwarded-For`, right to left, skipping trusted hops.
+- **Behind a TLS proxy.** Inside the container every request arrives as plain HTTP, so the `Secure` cookie flag and any absolute URLs come from config (`SIFTSTR_BASE_URL`), not from `r.TLS`. Don't reject requests based on the `Host` header. The client IP for login limits is the connecting address unless that address is inside `SIFTSTR_TRUSTED_PROXIES`; then it is read from `X-Forwarded-For`, right to left, skipping trusted hops. At startup Siftstr logs a warning when `SIFTSTR_BASE_URL` is empty or not `https://`. When it is `https://`, every response also carries `Strict-Transport-Security: max-age=31536000`; browsers ignore it over plain HTTP.
 
 ### API keys
 
@@ -533,7 +534,7 @@ Everything that must survive a restart lives under `/data`, so a single named vo
 |---|---|---|
 | `SIFTSTR_LISTEN` | `:8080` | Listen address |
 | `SIFTSTR_DATA_DIR` | `/data` | Database, key, and default export location |
-| `SIFTSTR_BASE_URL` | none | URL the Claude task and browsers use to reach Siftstr: a local `http://host:port`, an IP, or a public `https://` domain. Used for absolute links; `Secure` cookies only when it is `https://` |
+| `SIFTSTR_BASE_URL` | none | URL the Claude task and browsers use to reach Siftstr: a local `http://host:port`, an IP, or a public `https://` domain. Used for absolute links; `Secure` cookies and the `Strict-Transport-Security` header only when it is `https://`; a startup warning is logged otherwise |
 | `SIFTSTR_TRUSTED_PROXIES` | none | Comma-separated CIDRs (or single IPs) of reverse proxies. Only a request that connects from one of them has its client IP taken from `X-Forwarded-For`, read from the right and skipping trusted hops; otherwise the connecting address is the client IP. Used by the login limits |
 | `SIFTSTR_SECRET_KEY` | auto-generated file | Encryption key for `connections` secrets |
 | `SIFTSTR_ADMIN_USER` / `SIFTSTR_ADMIN_PASSWORD` | none | Bootstrap admin on first start |

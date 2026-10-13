@@ -39,7 +39,10 @@ type Page struct {
 	PhoneFlow    string // "up" or "down": list direction on a phone (item lists and /settings/sources)
 	ZoneGroups   []ZoneGroup
 	Keys         []KeyRow
-	NewKey       string // a just-created API key, shown once
+	Sessions     []SessionRow // /settings/sessions
+	IdleDays     int          // /settings/sessions: auth.SessionIdleTimeout in days
+	LifetimeDays int          // /settings/sessions: auth.SessionLifetime in days
+	NewKey       string       // a just-created API key, shown once
 	Prompts      []PromptField
 	Destinations []Destination
 	NostrRelays  string // /settings/nostr: one relay per line
@@ -94,6 +97,13 @@ type KeyRow struct {
 	Created  string // already in the user's timezone
 	LastUsed string
 	Revoked  string
+}
+
+// SessionRow is one active session on /settings/sessions. It never carries
+// the session token or its hash.
+type SessionRow struct {
+	Created, LastSeen, Expires string // already in the user's timezone
+	Current                    bool
 }
 
 // ZoneGroup is one region of the timezone dropdown.
@@ -174,6 +184,7 @@ var pageFiles = map[string][]string{
 	"settings_destinations": {"settings_nav.html", "settings_destinations.html"},
 	"settings_prompts":      {"settings_nav.html", "settings_prompts.html"},
 	"settings_keys":         {"settings_nav.html", "settings_keys.html"},
+	"settings_sessions":     {"settings_nav.html", "settings_sessions.html"},
 	"settings_activity":     {"settings_nav.html", "settings_activity.html"},
 	"settings_nostr":        {"settings_nav.html", "settings_nostr.html"},
 }

@@ -339,3 +339,66 @@ func TestBadgeWords(t *testing.T) {
 		}
 	}
 }
+
+func TestSecurityHeadersPresentOnEveryResponse(t *testing.T) {
+	e := setup(t, nil, false)
+	for _, p := range []string{"/login", "/healthz"} {
+		resp, err := http.Get(e.srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		h := resp.Header
+		if h.Get("Content-Security-Policy") == "" || h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "same-origin" {
+			t.Errorf("%s: missing security headers: %v", p, h)
+		}
+	}
+}
+
+func TestHSTSSentWhenSecure(t *testing.T) {
+	e := setup(t, nil, true)
+	for _, p := range []string{"/login", "/healthz", "/static/app.css"} {
+		resp, err := http.Get(e.srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Strict-Transport-Security"); got != "max-age=31536000" {
+			t.Errorf("%s: Strict-Transport-Security = %q", p, got)
+		}
+	}
+}
+
+// Guard: HSTS must stay off unless BASE_URL is https.
+func TestNoHSTSWhenNotSecure(t *testing.T) {
+	e := setup(t, nil, false)
+	resp, err := http.Get(e.srv.URL + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("Strict-Transport-Security = %q, want empty", got)
+	}
+}
+
+// Logout ends only the session it was called from.
+func TestLogoutEndsOnlyThatSession(t *testing.T) {
+	e := setup(t, nil, false)
+	_, _ = e.auth.CreateUser(context.Background(), "alice", "password-one", auth.RoleUser)
+	c1, c2 := e.client(), e.client()
+	e.login(t, c1, "alice", "password-one")
+	e.login(t, c2, "alice", "password-one")
+	resp, _ := c1.Get(e.srv.URL + "/today")
+	tok := csrfRe.FindStringSubmatch(e.body(t, resp))[1]
+	resp, _ = c1.PostForm(e.srv.URL+"/logout", url.Values{"csrf": {tok}})
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("logout = %d", resp.StatusCode)
+	}
+	if resp, _ = c1.Get(e.srv.URL + "/today"); resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("c1 /today = %d", resp.StatusCode)
+	}
+	if resp, _ = c2.Get(e.srv.URL + "/today"); resp.StatusCode != http.StatusOK {
+		t.Errorf("c2 /today = %d", resp.StatusCode)
+	}
+}

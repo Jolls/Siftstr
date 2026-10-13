@@ -315,3 +315,12 @@ func TestBaseRendersChosenTheme(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionsPageTemplate(t *testing.T) {
+	out := render(t, "settings_sessions", Page{Title: "Sessions", User: &User{ID: "u", Name: "a"}, CSRF: "tok", IdleDays: 7, LifetimeDays: 30})
+	for _, want := range []string{"7 days", "30 days", `name="csrf" value="tok"`, `action="/settings/sessions/end-all"`, "data-logout"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}

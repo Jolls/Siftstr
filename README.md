@@ -97,7 +97,7 @@ The admin variables only matter on the first start, when there are no users yet.
 |---|---|---|
 | `SIFTSTR_LISTEN` | `:8080` | Listen address (plain HTTP). |
 | `SIFTSTR_DATA_DIR` | `/data` | Database, key, briefings and backups. |
-| `SIFTSTR_BASE_URL` | none | The URL browsers and the Claude task use to reach Siftstr. Drives absolute links and the `Secure` cookie flag. |
+| `SIFTSTR_BASE_URL` | none | The URL browsers and the Claude task use to reach Siftstr. Drives absolute links and the `Secure` cookie flag. Also turns on the `Strict-Transport-Security` header when it starts with `https://`. |
 | `SIFTSTR_TRUSTED_PROXIES` | none | Comma-separated CIDRs (or IPs) of your reverse proxy. Login limits then read the client IP from `X-Forwarded-For`. |
 | `SIFTSTR_SECRET_KEY` | generated | Key that encrypts saved upstream credentials. If unset, Siftstr creates `/data/secret.key`. |
 | `SIFTSTR_ADMIN_USER`, `SIFTSTR_ADMIN_PASSWORD` | none | Creates the first admin on first start. |
@@ -120,7 +120,19 @@ The container never terminates TLS. Put Caddy, Traefik, nginx, Tailscale or simi
 
 - Set `SIFTSTR_BASE_URL` to the address people actually use. The session cookie gets the `Secure` flag only when that URL starts with `https://`, and it is never inferred from the request, so behind a TLS proxy set it to your `https://` address.
 - Set `SIFTSTR_TRUSTED_PROXIES` to the address or subnet your proxy connects from, for example the Docker network's subnet such as `172.18.0.0/16`. Without it every login seems to come from the proxy, so 20 failed logins from anyone block logins for everyone for 15 minutes. List only addresses you control: a listed address can claim any client IP in `X-Forwarded-For`.
-- If you serve it over plain `http://` on a LAN, the cookie is not `Secure`. That works, but anyone on that network can read the traffic.
+- If you serve it over plain `http://` on a LAN, the cookie is not `Secure`. That works, but anyone on that network can read the traffic. Siftstr logs a warning at startup in this case.
+
+### Exposing Siftstr publicly
+
+Do not expose Siftstr to the internet without HTTPS. The container only speaks plain HTTP, so a TLS reverse proxy is required (see [Reverse proxy and TLS](#reverse-proxy-and-tls)). `compose.yaml` binds the port to `127.0.0.1` only; keep that bind and let the proxy be the only public listener.
+
+Checklist:
+
+- `SIFTSTR_BASE_URL` is set to the `https://` address people use.
+- `SIFTSTR_TRUSTED_PROXIES` is set to the proxy's address or subnet.
+- The port is still bound to `127.0.0.1`, or is otherwise reachable only through the proxy.
+
+At startup Siftstr logs a warning when `SIFTSTR_BASE_URL` is not `https://`. With an `https://` value it sends `Strict-Transport-Security: max-age=31536000`.
 
 The same URL is what the Claude task calls, so it has to be reachable from where the task runs. See [docs/scheduled-task.md](docs/scheduled-task.md).
 
