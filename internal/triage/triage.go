@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -166,6 +167,44 @@ func (s *Service) SetTheme(ctx context.Context, userID, theme string) error {
 	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
 		ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`, userID, settingTheme, theme)
+	return err
+}
+
+// Accent color (user_settings key "accent"): a Pico color family. Jade, the
+// default, is the embedded Pico build's own accent.
+const (
+	settingAccent = "accent"
+	AccentDefault = "jade"
+)
+
+// Accents are the offered families, in Pico's hue order. Pico's neutrals are
+// left out: slate's button color matches the secondary buttons.
+var Accents = []string{"red", "pink", "fuchsia", "purple", "violet", "indigo", "blue", "azure", "cyan", "jade",
+	"green", "lime", "yellow", "amber", "pumpkin", "orange"}
+
+// ErrBadAccent is returned by SetAccent for a value that is not offered.
+var ErrBadAccent = errors.New("accent is not one of the offered colors")
+
+// Accent returns the user's accent, AccentDefault when none (or an unknown value) was saved.
+func (s *Service) Accent(ctx context.Context, userID string) (string, error) {
+	var v string
+	err := s.DB.QueryRowContext(ctx, `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`, userID, settingAccent).Scan(&v)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return AccentDefault, err
+	}
+	if !slices.Contains(Accents, v) {
+		return AccentDefault, nil
+	}
+	return v, nil
+}
+
+// SetAccent saves the user's accent.
+func (s *Service) SetAccent(ctx context.Context, userID, accent string) error {
+	if !slices.Contains(Accents, accent) {
+		return ErrBadAccent
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
+		ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`, userID, settingAccent, accent)
 	return err
 }
 

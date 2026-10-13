@@ -28,7 +28,7 @@
   </hgroup>
   {{if .Summary}}<p class="summary">{{.Summary}}</p>{{else if .Excerpt}}<p class="excerpt">{{.Excerpt}}</p>{{end}}
   <footer class="controls" aria-label="Triage actions">
-    <span class="badge" data-badge{{if not .Badge}} hidden{{end}}>{{.Badge}}</span>
+    <span class="badge" data-badge="{{.Badge}}"{{if not .Badge}} hidden{{end}}>{{.Badge}}</span>
     <span class="notice" data-notice role="status" hidden></span>
     <button type="button" class="secondary" data-action="archive"><span class="label-delete">Delete</span><span class="label-archive">Archive</span></button>
     <button type="button" data-action="keep">Keep</button>

@@ -75,6 +75,7 @@ type session struct {
 	// Problems is how many stopped outbox entries need attention.
 	Problems int
 	Theme    string // "auto", "light" or "dark"; empty means auto
+	Accent   string // one of triage.Accents; empty means jade
 }
 
 // New returns the HTTP handler.
@@ -114,6 +115,8 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("POST /settings/timezone", s.protected(s.timezoneSave))
 	mux.HandleFunc("POST /settings/display", s.protected(s.displaySave))
 	mux.HandleFunc("POST /settings/theme", s.protected(s.themeSave))
+	mux.HandleFunc("GET /settings/appearance", s.protected(s.appearanceForm))
+	mux.HandleFunc("POST /settings/accent", s.protected(s.accentSave))
 	mux.HandleFunc("GET /settings/keys", s.protected(s.keysForm))
 	mux.HandleFunc("POST /settings/keys", s.protected(s.keyCreate))
 	mux.HandleFunc("POST /settings/keys/{id}/revoke", s.protected(s.keyRevoke))
@@ -165,10 +168,11 @@ func (s *server) protected(h func(http.ResponseWriter, *http.Request, *session))
 			return
 		}
 		sess := &session{User: u, Token: c.Value, CSRF: s.Auth.CSRFToken(c.Value)}
-		// Only pages render a theme: GETs, and settings POSTs that re-render on error.
+		// Only pages render a theme and accent: GETs, and settings POSTs that re-render on error.
 		// A failed lookup must never block a page; it just falls back to the OS theme.
 		if req.Method == http.MethodGet || req.Method == http.MethodHead || strings.HasPrefix(req.URL.Path, "/settings/") {
 			sess.Theme, _ = s.Triage.Theme(req.Context(), u.ID)
+			sess.Accent, _ = s.Triage.Accent(req.Context(), u.ID)
 		}
 		// A failed count must never block a page, so an error just hides the alert.
 		if req.Method == http.MethodGet {
@@ -239,7 +243,7 @@ func (s *server) ping(w http.ResponseWriter, _ *http.Request, u auth.User) {
 }
 
 func (s *server) page(sess *session, active, title string) ui.Page {
-	return ui.Page{Title: title, Active: active, User: &ui.User{ID: sess.User.ID, Name: sess.User.Username}, CSRF: sess.CSRF, Problems: sess.Problems, Theme: sess.Theme}
+	return ui.Page{Title: title, Active: active, User: &ui.User{ID: sess.User.ID, Name: sess.User.Username}, CSRF: sess.CSRF, Problems: sess.Problems, Theme: sess.Theme, Accent: sess.Accent}
 }
 
 // badge is the word an actioned card shows. gestures.js has the same rule.

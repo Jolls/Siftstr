@@ -656,3 +656,48 @@ func TestThemeSetting(t *testing.T) {
 		t.Error("unknown stored value should read as auto")
 	}
 }
+
+func TestAccentSetting(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	accent := func(u string) string {
+		t.Helper()
+		v, err := f.s.Accent(ctx, u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if AccentDefault != "jade" || len(Accents) != 16 {
+		t.Fatalf("default %q, %d accents", AccentDefault, len(Accents))
+	}
+	if accent("u1") != AccentDefault {
+		t.Fatal("default is not jade")
+	}
+	if err := f.s.SetAccent(ctx, "u1", "red"); err != nil {
+		t.Fatal(err)
+	}
+	if accent("u1") != "red" {
+		t.Error("saved accent not returned")
+	}
+	if accent("u2") != AccentDefault {
+		t.Error("u1's accent leaked to u2")
+	}
+	for _, bad := range []string{"neon", "", "Red", "slate", "grey"} {
+		if err := f.s.SetAccent(ctx, "u1", bad); !errors.Is(err, ErrBadAccent) {
+			t.Errorf("SetAccent(%q) = %v, want ErrBadAccent", bad, err)
+		}
+	}
+	if accent("u1") != "red" {
+		t.Error("a rejected value changed the saved accent")
+	}
+	f.exec(t, `INSERT INTO user_settings (user_id, key, value) VALUES ('u2', 'accent', 'neon')`)
+	if accent("u2") != AccentDefault {
+		t.Error("unknown stored value should read as jade")
+	}
+	for _, a := range Accents {
+		if err := f.s.SetAccent(ctx, "u1", a); err != nil {
+			t.Errorf("SetAccent(%q) = %v", a, err)
+		}
+	}
+}

@@ -32,15 +32,42 @@
 .item[data-state="archived"] .controls, .item[data-state="kept"] .controls, .item[data-state="pending_deep"] .controls { justify-content: space-between; }
 .item[data-state="archived"] [data-action="undo"], .item[data-state="kept"] [data-action="undo"], .item[data-state="pending_deep"] [data-action="undo"] { margin-inline-start: auto; }
 
+/* Status badge colors: fixed per status, not the accent. Light values, then dark by OS preference or forced theme. */
+:root {
+  --badge-deleted-bg: #b91c1c; --badge-deleted-fg: #ffffff;
+  --badge-archived-bg: #6b7280; --badge-archived-fg: #ffffff;
+  --badge-promoted-bg: #bbf7d0; --badge-promoted-fg: #14532d;
+  --badge-kept-bg: #bfdbfe; --badge-kept-fg: #1e3a8a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --badge-deleted-bg: #991b1b; --badge-deleted-fg: #ffffff;
+    --badge-archived-bg: #4b5563; --badge-archived-fg: #f9fafb;
+    --badge-promoted-bg: #166534; --badge-promoted-fg: #dcfce7;
+    --badge-kept-bg: #1e40af; --badge-kept-fg: #dbeafe;
+  }
+}
+:root[data-theme="dark"] {
+  --badge-deleted-bg: #991b1b; --badge-deleted-fg: #ffffff;
+  --badge-archived-bg: #4b5563; --badge-archived-fg: #f9fafb;
+  --badge-promoted-bg: #166534; --badge-promoted-fg: #dcfce7;
+  --badge-kept-bg: #1e40af; --badge-kept-fg: #dbeafe;
+}
+
 .badge {
   padding: 0.1rem 0.6rem;
   border-radius: 1rem;
   font-size: 0.8rem;
   background: var(--pico-muted-border-color);
 }
-.item[data-state="archived"],
-.item[data-state="kept"],
-.item[data-state="pending_deep"] { opacity: 0.6; }
+.badge[data-badge="deleted"] { background: var(--badge-deleted-bg); color: var(--badge-deleted-fg); }
+.badge[data-badge="archived"] { background: var(--badge-archived-bg); color: var(--badge-archived-fg); }
+.badge[data-badge="promoted"] { background: var(--badge-promoted-bg); color: var(--badge-promoted-fg); }
+.badge[data-badge="kept"] { background: var(--badge-kept-bg); color: var(--badge-kept-fg); }
+/* A triaged card dims, except its badge: dimmed badge text would fail AA contrast. */
+.item[data-state="archived"] > hgroup, .item[data-state="archived"] .controls > :not(.badge),
+.item[data-state="kept"] > hgroup, .item[data-state="kept"] .controls > :not(.badge),
+.item[data-state="pending_deep"] > hgroup, .item[data-state="pending_deep"] .controls > :not(.badge) { opacity: 0.6; }
 
 /* Mobile: one card at a time, scroll-snapped. By default (data-flow="up") the
    list is drawn upside down (the DOM keeps the sifting order) so the card to sift is at the bottom, under

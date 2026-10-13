@@ -143,7 +143,7 @@ func TestSettingsOversizedBodyIs413(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized settings post = %d, want 413", resp.StatusCode)
 	}
-	if _, page := e.get(t, c, "/settings/sources"); strings.Contains(page, `name="theme" value="dark" checked`) {
+	if _, page := e.get(t, c, "/settings/appearance"); strings.Contains(page, `name="theme" value="dark" checked`) {
 		t.Error("the oversized post changed the theme")
 	}
 }
@@ -156,7 +156,7 @@ func TestSettingsOversizedMultipartIs413(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized multipart = %d, want 413", resp.StatusCode)
 	}
-	if _, page := e.get(t, c, "/settings/sources"); strings.Contains(page, `name="theme" value="dark" checked`) {
+	if _, page := e.get(t, c, "/settings/appearance"); strings.Contains(page, `name="theme" value="dark" checked`) {
 		t.Error("the oversized post changed the theme")
 	}
 }
