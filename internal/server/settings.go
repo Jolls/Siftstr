@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
-	"github.com/Jolls/Siftstr/internal/outbox"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/connections"
 	"github.com/Jolls/Siftstr/internal/ingest/nostr"
+	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/triage"
@@ -29,6 +32,22 @@ var destinationKinds = []ui.Destination{
 }
 
 var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked.", "retried": "Queued to send again.", "dismissed": "Dismissed.", "released": "Held actions released. They will be sent shortly."}
+
+// connStatusText is the label and help shown for each check state.
+var connStatusText = map[string][2]string{
+	"":                           {"Not checked yet", ""},
+	connections.StateOK:          {"Connected", ""},
+	connections.StateUnreachable: {"Can't reach it", "Siftstr could not open a connection to this address. Check the host and port, and that the Siftstr container can reach it."},
+	connections.StateTLS:         {"Certificate problem", "The HTTPS certificate is not trusted, or this port does not speak HTTPS."},
+	connections.StateAuth:        {"Key problem", "The service did not accept the saved key, or there is none. Enter it again."},
+	connections.StateUnexpected:  {"Unexpected response", "Something answered at this address, but not the way this service does. Check the base URL."},
+}
+
+// connViaText says where a check came from.
+var connViaText = map[string]string{
+	connections.ViaSave: "when saved", connections.ViaTest: "by Test connection",
+	connections.ViaIngest: "while fetching new items", connections.ViaOutbox: "while sending an update",
+}
 
 func (s *server) settingsPage(sess *session, req *http.Request, title string) ui.Page {
 	p := s.page(sess, "settings", title)
@@ -154,15 +173,34 @@ func (s *server) renderDestinations(w http.ResponseWriter, req *http.Request, se
 		serverError(w)
 		return
 	}
+	statuses, err := s.Conns.Statuses(req.Context(), sess.User.ID)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	loc, err := time.LoadLocation(sess.User.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
 	p := s.settingsPage(sess, req, "Destinations")
 	p.Error = msg
 	for _, d := range destinationKinds {
 		for _, c := range saved {
 			if c.Kind == d.Kind {
 				d.Connected, d.BaseURL, d.HasSecret = true, c.BaseURL, c.HasSecret
+				d.PlainHTTPPublic = plainHTTPToPublicHost(c.BaseURL)
+				d.ID = c.ID
+				if st, ok := statuses[c.ID]; ok {
+					d.Status, d.StatusDetail, d.StatusVia = st.State, st.Detail, connViaText[st.Via]
+					if !st.At.IsZero() {
+						d.StatusWhen = st.At.In(loc).Format("2006-01-02 15:04")
+					}
+				}
 				break
 			}
 		}
+		text := connStatusText[d.Status]
+		d.StatusLabel, d.StatusHelp = text[0], text[1]
 		p.Destinations = append(p.Destinations, d)
 	}
 	choice, err := s.Dest.Get(req.Context(), sess.User.ID)
@@ -187,6 +225,42 @@ func (s *server) renderDestinations(w http.ResponseWriter, req *http.Request, se
 		p.Keep = append(p.Keep, kc)
 	}
 	s.ui.Render(w, status, "settings_destinations", p)
+}
+
+// checkConnection tests c with its saved secret and records the result. It
+// never puts the secret in a page or a log line.
+func (s *server) checkConnection(ctx context.Context, userID string, c connections.Connection, via string) {
+	if s.CheckConnection == nil {
+		return
+	}
+	secret, err := s.Conns.Secret(ctx, userID, c.ID)
+	if errors.Is(err, connections.ErrNoSecret) && c.Kind == writeback.MeTube {
+		secret, err = "", nil // MeTube's secret is optional
+	}
+	if err == nil {
+		err = s.CheckConnection(ctx, c.Kind, c.BaseURL, secret)
+	}
+	s.Conns.Observe(ctx, userID, c, via, time.Now(), err)
+}
+
+// destinationTest re-checks a saved connection without changing it.
+func (s *server) destinationTest(w http.ResponseWriter, req *http.Request, sess *session) {
+	kind := req.PathValue("kind")
+	if !knownDestination(kind) {
+		http.NotFound(w, req)
+		return
+	}
+	cur, found, err := s.existing(req, sess.User.ID, kind)
+	if err != nil {
+		serverError(w)
+		return
+	}
+	if !found {
+		http.NotFound(w, req)
+		return
+	}
+	s.checkConnection(req.Context(), sess.User.ID, cur, connections.ViaTest)
+	http.Redirect(w, req, "/settings/destinations#dest-"+kind, http.StatusSeeOther)
 }
 
 func knownDestination(kind string) bool {
@@ -235,15 +309,17 @@ func (s *server) destinationSave(w http.ResponseWriter, req *http.Request, sess 
 		serverError(w)
 		return
 	}
+	var saved connections.Connection
 	if found {
-		_, err = s.Conns.Update(req.Context(), sess.User.ID, cur.ID, connections.UpdateInput{
+		saved, err = s.Conns.Update(req.Context(), sess.User.ID, cur.ID, connections.UpdateInput{
 			BaseURL: &baseURL, Secret: &secret, ClearSecret: req.PostFormValue("clear_secret") != "",
 		})
 	} else {
-		_, err = s.Conns.Create(req.Context(), sess.User.ID, connections.Input{Kind: kind, BaseURL: baseURL, Secret: &secret})
+		saved, err = s.Conns.Create(req.Context(), sess.User.ID, connections.Input{Kind: kind, BaseURL: baseURL, Secret: &secret})
 	}
 	switch {
 	case err == nil:
+		s.checkConnection(req.Context(), sess.User.ID, saved, connections.ViaSave)
 		http.Redirect(w, req, "/settings/destinations?notice=saved", http.StatusSeeOther)
 	case errors.Is(err, connections.ErrBaseURL):
 		s.renderDestinations(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
@@ -479,7 +555,7 @@ func (s *server) sessionsEndAll(w http.ResponseWriter, req *http.Request, sess *
 		return
 	}
 	_, _ = s.newKeys.take(sess.Token)
-	s.clearCookie(w, sessionCookie)
+	s.clearCookie(w, s.sessionCookie())
 	http.Redirect(w, req, "/login", http.StatusSeeOther)
 }
 
@@ -569,4 +645,35 @@ func (s *server) nostrDelete(w http.ResponseWriter, req *http.Request, sess *ses
 		return
 	}
 	http.Redirect(w, req, "/settings/nostr?notice=disconnected", http.StatusSeeOther)
+}
+
+// cgnat is 100.64.0.0/10, which Tailscale and carrier NAT use.
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// plainHTTPToPublicHost reports whether a saved base URL sends its secret
+// unencrypted to a host that may be on the internet. It never resolves names:
+// IP literals are judged by range, and localhost, single-label names and the
+// .local, .lan, .home.arpa and .internal suffixes count as private.
+func plainHTTPToPublicHost(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" {
+		return false
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		ip = ip.WithZone("").Unmap()
+		return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || cgnat.Contains(ip))
+	}
+	if host == "localhost" || !strings.Contains(host, ".") {
+		return false
+	}
+	for _, suf := range []string{".localhost", ".local", ".lan", ".home.arpa", ".internal"} {
+		if strings.HasSuffix(host, suf) {
+			return false
+		}
+	}
+	return true
 }

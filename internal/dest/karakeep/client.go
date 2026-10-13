@@ -29,6 +29,20 @@ func NewClient(baseURL, token string, hc *http.Client) *Client {
 	return &Client{base: strings.TrimRight(baseURL, "/"), token: token, hc: hc}
 }
 
+// Check reads the current user, which changes nothing upstream.
+func (c *Client) Check(ctx context.Context) error {
+	var me struct {
+		ID string `json:"id"`
+	}
+	if _, err := dest.Call(ctx, c.hc, http.MethodGet, c.base+"/api/v1/users/me", c.header(), nil, &me); err != nil {
+		return err
+	}
+	if me.ID == "" {
+		return dest.UnexpectedReply("the reply is not a Karakeep user")
+	}
+	return nil
+}
+
 func (c *Client) header() map[string]string {
 	return map[string]string{"Authorization": "Bearer " + c.token}
 }

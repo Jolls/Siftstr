@@ -127,3 +127,16 @@ func TestBaseURLWarning(t *testing.T) {
 		t.Errorf("https: warning = %q, want none", w)
 	}
 }
+
+func TestUserCommandsRejectElevenCharPasswords(t *testing.T) {
+	t.Setenv("SIFTSTR_DATA_DIR", t.TempDir())
+	if err := run([]string{"user", "add", "bob"}, strings.NewReader("elevenchars\n")); err == nil {
+		t.Error("user add accepted 11 chars")
+	}
+	if err := run([]string{"user", "add", "alice"}, strings.NewReader("password-one\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"user", "set-password", "alice"}, strings.NewReader("elevenchars\n")); err == nil {
+		t.Error("set-password accepted 11 chars")
+	}
+}

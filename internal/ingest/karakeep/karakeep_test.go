@@ -3,6 +3,7 @@ package karakeep
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/dest"
 	kk "github.com/Jolls/Siftstr/internal/dest/karakeep"
 	"github.com/Jolls/Siftstr/internal/store"
 )
@@ -494,5 +496,36 @@ func TestStopsAtThePageWhereNothingIsNew(t *testing.T) {
 	f.api.pages = 0
 	if res = f.run("u1"); res.Items != 1 || f.api.pages != 2 {
 		t.Fatalf("one new bookmark: %+v after %d pages", res, f.api.pages)
+	}
+}
+
+func (f *fixture) connStatus() (state, detail, via string) {
+	f.t.Helper()
+	var st sql.NullString
+	if err := f.st.DB().QueryRow(`SELECT check_state, check_detail, check_via FROM connections WHERE kind = 'karakeep'`).Scan(&st, &detail, &via); err != nil {
+		f.t.Fatal(err)
+	}
+	return st.String, detail, via
+}
+
+func TestListFailureRecordsConnectionStatus(t *testing.T) {
+	f := newFixture(t)
+	f.connect("u1")
+	f.api.listErr = fmt.Errorf("GET x: %w", &dest.StatusError{Code: 503})
+	if _, err := f.s.Run(context.Background(), "u1"); err == nil {
+		t.Fatal("want an error")
+	}
+	if state, detail, via := f.connStatus(); state != "unexpected" || detail != "HTTP 503" || via != "ingest" {
+		t.Fatalf("%q %q %q", state, detail, via)
+	}
+}
+
+func TestDisabledSourceRecordsNothing(t *testing.T) {
+	f := newFixture(t)
+	f.connect("u1")
+	f.exec(`INSERT INTO sources (id, user_id, kind, external_id, name, enabled) VALUES ('srckk','u1','karakeep','karakeep','Karakeep',0)`)
+	f.run("u1")
+	if state, _, _ := f.connStatus(); state != "" {
+		t.Fatalf("state = %q", state)
 	}
 }

@@ -22,6 +22,14 @@ type Sender struct {
 	DB        *sql.DB
 	Conns     *connections.Service
 	Factories map[string]dest.Factory // by connection kind
+	Now       func() time.Time        // time.Now if nil
+}
+
+func (s *Sender) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 // Handle is the outbox.Runner handler. It never logs or returns a secret.
@@ -39,15 +47,20 @@ func (s *Sender) Handle(ctx context.Context, e outbox.Entry) error {
 	if !ok {
 		return dest.Permanent(fmt.Errorf("no destination for %q", conn.Kind))
 	}
+	observe := func(err error) {
+		s.Conns.Observe(ctx, e.UserID, conn, connections.ViaOutbox, s.now(), err)
+	}
 	secret, err := s.Conns.Secret(ctx, e.UserID, e.ConnectionID)
 	switch {
 	case errors.Is(err, connections.ErrNoSecret):
 		// MeTube's token is optional. The others cannot work without one, and
 		// sending an empty token would only earn a retried 401.
 		if conn.Kind != MeTube {
+			observe(err)
 			return dest.Permanent(fmt.Errorf("no secret is saved for the %s connection", conn.Kind))
 		}
 	case err != nil:
+		observe(err)
 		return err // unreadable: retry, the user may re-enter it
 	}
 	var item dest.Item
@@ -61,7 +74,9 @@ func (s *Sender) Handle(ctx context.Context, e outbox.Entry) error {
 		}
 	}
 	d := f(conn.BaseURL, secret, conn.Config)
-	if err := d.Send(ctx, item); err != nil {
+	err = d.Send(ctx, item)
+	observe(err)
+	if err != nil {
 		return err
 	}
 	if r, ok := d.(dest.BookmarkReporter); ok && s.DB != nil && r.BookmarkID() != "" && (item.Verb == dest.VerbSave || item.Verb == dest.VerbCreate) {

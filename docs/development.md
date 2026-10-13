@@ -11,7 +11,7 @@ docker compose -f compose.dev.yaml up -d --build
 docker compose -f compose.dev.yaml logs -f
 ```
 
-Open <http://localhost:8081> and log in as `admin` with `admin123` (fixed in `compose.dev.yaml`; this instance is throwaway, so the password is deliberately weak). Never add real connections to this instance.
+Open <http://localhost:8081> and log in as `admin` with `adminpassword` (fixed in `compose.dev.yaml`; this instance is throwaway, so the password is deliberately weak). An existing `./.local/dev-data` keeps the password it was created with; reset it (see Reset) to pick up a changed one. Never add real connections to this instance.
 
 ## Seed
 

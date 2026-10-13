@@ -86,10 +86,11 @@ func (g *Syncer) Run(ctx context.Context, userID string) (Result, error) {
 	}
 	token, err := g.Conns.Secret(ctx, userID, conn.ID)
 	if err != nil {
+		g.Conns.Observe(ctx, userID, conn, connections.ViaIngest, g.Now(), err)
 		return res, fmt.Errorf("karakeep token: %w", err)
 	}
 	api := g.New(conn.BaseURL, token)
-	ierr := g.ingest(ctx, userID, api, &res)
+	ierr := g.ingest(ctx, userID, conn, api, &res)
 	rerr := g.resolve(ctx, userID, api, &res)
 	return res, errors.Join(ierr, rerr)
 }
@@ -108,7 +109,7 @@ func (g *Syncer) connection(ctx context.Context, userID string) (connections.Con
 }
 
 // ingest lists unarchived bookmarks newest first and offers each new one.
-func (g *Syncer) ingest(ctx context.Context, userID string, api API, res *Result) error {
+func (g *Syncer) ingest(ctx context.Context, userID string, conn connections.Connection, api API, res *Result) error {
 	cfg, err := sources.New(g.DB).Ingest(ctx, userID)
 	if err != nil {
 		return err
@@ -148,6 +149,9 @@ func (g *Syncer) ingest(ctx context.Context, userID string, api API, res *Result
 	complete := false // the walk reached the age limit or the end of the library
 	for page := 0; page < maxPages; page++ {
 		p, err := api.ListUnarchived(ctx, cursor, pageSize)
+		if page == 0 {
+			g.Conns.Observe(ctx, userID, conn, connections.ViaIngest, g.Now(), err)
+		}
 		if err != nil {
 			return fmt.Errorf("list karakeep bookmarks: %w", err)
 		}

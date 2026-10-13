@@ -145,13 +145,22 @@ type SourceRow struct {
 // Destination is one upstream connection form on /settings/destinations.
 // The secret itself is never part of it, only whether one is saved.
 type Destination struct {
-	Kind        string
-	Label       string
-	Help        string
-	SecretLabel string
-	Connected   bool
-	BaseURL     string
-	HasSecret   bool
+	Kind         string
+	Label        string
+	Help         string
+	SecretLabel  string
+	Connected    bool
+	BaseURL      string
+	HasSecret    bool
+	ID           string // the saved connection, when Connected
+	Status       string // check state; "" = never checked
+	StatusLabel  string
+	StatusHelp   string
+	StatusDetail string // short reason, never a secret
+	StatusWhen   string // in the user's timezone
+	StatusVia    string
+	// PlainHTTPPublic: the saved base URL is http:// to a host that is not a private address.
+	PlainHTTPPublic bool
 }
 
 // User is the part of the signed-in user the templates need.

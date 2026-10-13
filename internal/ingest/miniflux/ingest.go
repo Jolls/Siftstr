@@ -62,15 +62,17 @@ func (g *Ingester) Run(ctx context.Context, userID string) (Result, error) {
 	}
 	token, err := g.Conns.Secret(ctx, userID, conn.ID)
 	if err != nil {
+		g.Conns.Observe(ctx, userID, conn, connections.ViaIngest, g.Now(), err)
 		return res, fmt.Errorf("miniflux token: %w", err)
 	}
 	api := g.New(conn.BaseURL, token)
 
 	feeds, err := api.Feeds(ctx)
-	if err != nil {
-		return res, err
+	var entries []Entry
+	if err == nil {
+		entries, err = api.UnreadEntries(ctx)
 	}
-	entries, err := api.UnreadEntries(ctx)
+	g.Conns.Observe(ctx, userID, conn, connections.ViaIngest, g.Now(), err)
 	if err != nil {
 		return res, err
 	}

@@ -29,7 +29,7 @@ func TestRedirectIsAnErrorNotASilentGet(t *testing.T) {
 }
 
 func TestRedactDropsCredentialsAndQuery(t *testing.T) {
-	got := redact("https://user:pw@host.example.com/api/x?token=abc")
+	got := Redact("https://user:pw@host.example.com/api/x?token=abc")
 	if strings.Contains(got, "pw") || strings.Contains(got, "user") || strings.Contains(got, "abc") {
 		t.Fatalf("redact = %q", got)
 	}

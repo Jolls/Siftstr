@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -13,17 +14,19 @@ import (
 	"time"
 
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/dest"
 	"github.com/Jolls/Siftstr/internal/store"
 )
 
 type fake struct {
-	feeds   []Feed
-	entries []Entry
-	gotURL  string
-	gotTok  string
+	feeds    []Feed
+	feedsErr error
+	entries  []Entry
+	gotURL   string
+	gotTok   string
 }
 
-func (f *fake) Feeds(context.Context) ([]Feed, error)          { return f.feeds, nil }
+func (f *fake) Feeds(context.Context) ([]Feed, error)          { return f.feeds, f.feedsErr }
 func (f *fake) UnreadEntries(context.Context) ([]Entry, error) { return f.entries, nil }
 
 func setup(t *testing.T) (*Ingester, *fake, *store.Store) {
@@ -406,5 +409,101 @@ func TestKarakeepSummarySourceQueuesAnArchivedBookmark(t *testing.T) {
 	}
 	if got := count(t, st, `SELECT COUNT(*) FROM outbox WHERE user_id = 'u2'`); got != 0 {
 		t.Fatal("another user's outbox changed")
+	}
+}
+
+func TestClientRefusesRedirectAndKeepsToken(t *testing.T) {
+	var hit bool
+	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer b.Close()
+	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, b.URL+"/v1/feeds", http.StatusFound)
+	}))
+	defer a.Close()
+	_, err := NewClient(a.URL, "tok", nil).Feeds(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("err = %v", err)
+	}
+	if hit {
+		t.Error("redirect target was contacted")
+	}
+}
+
+func TestClientRefusesSameHostRedirect(t *testing.T) {
+	var hit bool
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/feeds" {
+			hit = true
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		http.Redirect(w, r, "/v2/feeds", http.StatusMovedPermanently)
+	}))
+	defer s.Close()
+	_, err := NewClient(s.URL, "tok", nil).Feeds(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "redirect") || hit {
+		t.Fatalf("err = %v hit = %v", err, hit)
+	}
+}
+
+func connStatus(t *testing.T, st *store.Store) (state, detail, via string) {
+	t.Helper()
+	if err := st.DB().QueryRow(`SELECT COALESCE(check_state,''), check_detail, check_via FROM connections WHERE kind = 'miniflux'`).Scan(&state, &detail, &via); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+func TestClientStatusErrorTextIsStable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", 401) }))
+	defer srv.Close()
+	_, err := NewClient(srv.URL, "tok", nil).Feeds(context.Background())
+	if err == nil || err.Error() != "miniflux /v1/feeds: status 401" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestClientStatusErrorIsTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", 401) }))
+	defer srv.Close()
+	_, err := NewClient(srv.URL, "tok", nil).Feeds(context.Background())
+	var se *dest.StatusError
+	if !errors.As(err, &se) || se.Code != 401 {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunRecordsConnectionStatus(t *testing.T) {
+	g, f, st := setup(t)
+	connect(t, g, "u1", "tok1")
+	f.feedsErr = fmt.Errorf("miniflux /v1/feeds: %w", &dest.StatusError{Code: 401})
+	if _, err := g.Run(context.Background(), "u1"); err == nil {
+		t.Fatal("want an error")
+	}
+	if state, _, via := connStatus(t, st); state != "auth" || via != "ingest" {
+		t.Fatalf("state=%q via=%q", state, via)
+	}
+	f.feedsErr = nil
+	if _, err := g.Run(context.Background(), "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if state, _, _ := connStatus(t, st); state != "ok" {
+		t.Fatalf("state=%q", state)
+	}
+}
+
+func TestRunRecordsMissingKey(t *testing.T) {
+	g, _, st := setup(t)
+	if _, err := g.Conns.Create(context.Background(), "u1", connections.Input{Kind: "miniflux", BaseURL: "https://mf.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Run(context.Background(), "u1"); err == nil {
+		t.Fatal("want an error")
+	}
+	if state, detail, _ := connStatus(t, st); state != "auth" || detail != "No key is saved." {
+		t.Fatalf("state=%q detail=%q", state, detail)
 	}
 }

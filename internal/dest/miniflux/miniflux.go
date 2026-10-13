@@ -30,6 +30,20 @@ func Factory(baseURL, secret string, _ json.RawMessage) dest.Destination {
 	return New(baseURL, secret, nil)
 }
 
+// Check implements dest.Checker: GET /v1/me, the current user.
+func (d *Destination) Check(ctx context.Context) error {
+	var me struct {
+		ID int64 `json:"id"`
+	}
+	if _, err := dest.Call(ctx, d.hc, http.MethodGet, d.base+"/v1/me", map[string]string{"X-Auth-Token": d.token}, nil, &me); err != nil {
+		return err
+	}
+	if me.ID == 0 {
+		return dest.UnexpectedReply("the reply is not a Miniflux user")
+	}
+	return nil
+}
+
 // Name implements dest.Destination.
 func (d *Destination) Name() string { return "miniflux" }
 

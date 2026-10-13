@@ -32,9 +32,22 @@ const (
 )
 
 const (
-	sessionCookie = "siftstr_session"
-	loginCookie   = "siftstr_login"
+	sessionCookieBase = "siftstr_session"
+	loginCookieBase   = "siftstr_login"
 )
+
+// cookieName adds the __Host- prefix when cookies are Secure, so a sibling
+// subdomain cannot set or overwrite them. Browsers accept a __Host- cookie
+// only with Secure, Path=/ and no Domain, which is how every cookie here is set.
+func cookieName(base string, secure bool) string {
+	if secure {
+		return "__Host-" + base
+	}
+	return base
+}
+
+func (s *server) sessionCookie() string { return cookieName(sessionCookieBase, s.SecureCookies) }
+func (s *server) loginCookie() string   { return cookieName(loginCookieBase, s.SecureCookies) }
 
 // Deps are the server's collaborators.
 type Deps struct {
@@ -59,6 +72,9 @@ type Deps struct {
 	// peer address is inside one of them has its client IP read from
 	// X-Forwarded-For.
 	TrustedProxies []netip.Prefix
+	// CheckConnection tests a saved connection with one cheap upstream call.
+	// Nil turns the test off (tests that do not set it make no upstream call).
+	CheckConnection func(ctx context.Context, kind, baseURL, secret string) error
 }
 
 type server struct {
@@ -132,6 +148,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /settings/destinations", s.protected(s.destinationsForm))
 	mux.HandleFunc("POST /settings/destinations/keep", s.protected(s.keepSave))
 	mux.HandleFunc("POST /settings/destinations/{kind}", s.protected(s.destinationSave))
+	mux.HandleFunc("POST /settings/destinations/{kind}/test", s.protected(s.destinationTest))
 	mux.HandleFunc("POST /settings/destinations/{kind}/delete", s.protected(s.destinationDelete))
 	return secureHeaders(s.SecureCookies, limitForms(mux)), nil
 }
@@ -152,7 +169,7 @@ func (s *server) healthz(w http.ResponseWriter, req *http.Request) {
 // Browsers without a session are sent to /login.
 func (s *server) protected(h func(http.ResponseWriter, *http.Request, *session)) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		c, err := req.Cookie(sessionCookie)
+		c, err := req.Cookie(s.sessionCookie())
 		if err != nil {
 			http.Redirect(w, req, "/login", http.StatusSeeOther)
 			return
@@ -160,7 +177,7 @@ func (s *server) protected(h func(http.ResponseWriter, *http.Request, *session))
 		u, err := s.Auth.UserForSession(req.Context(), c.Value)
 		if err != nil {
 			if errors.Is(err, auth.ErrNoSession) {
-				s.clearCookie(w, sessionCookie)
+				s.clearCookie(w, s.sessionCookie())
 				http.Redirect(w, req, "/login", http.StatusSeeOther)
 				return
 			}
@@ -297,7 +314,7 @@ func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter
 }
 
 func (s *server) loginForm(w http.ResponseWriter, req *http.Request) {
-	if c, err := req.Cookie(sessionCookie); err == nil {
+	if c, err := req.Cookie(s.sessionCookie()); err == nil {
 		if _, err := s.Auth.UserForSession(req.Context(), c.Value); err == nil {
 			http.Redirect(w, req, "/today", http.StatusSeeOther)
 			return
@@ -316,15 +333,23 @@ func (s *server) renderLogin(w http.ResponseWriter, status int, msg string) {
 	}
 	token := base64.RawURLEncoding.EncodeToString(b)
 	http.SetCookie(w, &http.Cookie{
-		Name: loginCookie, Value: token, Path: "/login",
+		Name: s.loginCookie(), Value: token, Path: "/",
 		HttpOnly: true, Secure: s.SecureCookies, SameSite: http.SameSiteStrictMode,
 	})
+	if !s.SecureCookies {
+		// Before the cookie moved to Path=/, it lived at /login. An old one
+		// would be sent first and fail the check, so expire it.
+		http.SetCookie(w, &http.Cookie{
+			Name: s.loginCookie(), Value: "", Path: "/login", MaxAge: -1,
+			HttpOnly: true, SameSite: http.SameSiteStrictMode,
+		})
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	s.ui.Render(w, status, "login", ui.Page{Title: "Sign in", CSRF: token, Error: msg})
 }
 
 func (s *server) login(w http.ResponseWriter, req *http.Request) {
-	c, err := req.Cookie(loginCookie)
+	c, err := req.Cookie(s.loginCookie())
 	form := req.PostFormValue("csrf")
 	if err != nil || form == "" || subtle.ConstantTimeCompare([]byte(c.Value), []byte(form)) != 1 {
 		s.renderLogin(w, http.StatusForbidden, "Your login form expired. Please try again.")
@@ -349,9 +374,9 @@ func (s *server) login(w http.ResponseWriter, req *http.Request) {
 		serverError(w)
 		return
 	}
-	s.clearCookie(w, loginCookie)
+	s.clearCookie(w, s.loginCookie())
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: token, Path: "/", Expires: expires,
+		Name: s.sessionCookie(), Value: token, Path: "/", Expires: expires,
 		HttpOnly: true, Secure: s.SecureCookies, SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, req, "/today", http.StatusSeeOther)
@@ -359,17 +384,13 @@ func (s *server) login(w http.ResponseWriter, req *http.Request) {
 
 func (s *server) logout(w http.ResponseWriter, req *http.Request, sess *session) {
 	_ = s.Auth.EndSession(req.Context(), sess.Token)
-	s.clearCookie(w, sessionCookie)
+	s.clearCookie(w, s.sessionCookie())
 	http.Redirect(w, req, "/login", http.StatusSeeOther)
 }
 
 func (s *server) clearCookie(w http.ResponseWriter, name string) {
-	path := "/"
-	if name == loginCookie {
-		path = "/login"
-	}
 	http.SetCookie(w, &http.Cookie{
-		Name: name, Value: "", Path: path, MaxAge: -1,
+		Name: name, Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: s.SecureCookies, SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -468,7 +489,7 @@ func limitForms(next http.Handler) http.Handler {
 func secureHeaders(hsts bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; form-action 'self'")
+		h.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
 		if hsts {

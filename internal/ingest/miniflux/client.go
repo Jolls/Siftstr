@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Jolls/Siftstr/internal/dest"
 )
 
 // Feed is a Miniflux feed with its category.
@@ -51,10 +53,13 @@ type Client struct {
 	http  *http.Client
 }
 
-// NewClient returns a Client for the Miniflux at baseURL.
+// NewClient returns a Client for the Miniflux at baseURL. With a nil hc it uses
+// dest.DefaultClient, which does not follow redirects, so the X-Auth-Token
+// header (which Go does not strip on a cross-host redirect) is never sent to
+// another address.
 func NewClient(baseURL, token string, hc *http.Client) *Client {
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		hc = dest.DefaultClient()
 	}
 	return &Client{base: strings.TrimRight(baseURL, "/"), token: token, http: hc}
 }
@@ -77,7 +82,11 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-		return fmt.Errorf("miniflux %s: status %d", path, resp.StatusCode)
+		err := fmt.Errorf("miniflux %s: %w", path, &dest.StatusError{Code: resp.StatusCode})
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			err = fmt.Errorf("%w (redirect: check that the saved base URL is the final address, e.g. https)", err)
+		}
+		return err
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(out); err != nil {
 		return fmt.Errorf("miniflux %s: decode: %w", path, err)

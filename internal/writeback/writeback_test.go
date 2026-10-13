@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -57,7 +58,7 @@ func newFixture(t *testing.T) *fixture {
 	f.tr = &triage.Service{DB: st.DB(), Now: clock, OnRelease: pl.OnRelease}
 	f.runs = &runs.Service{DB: st.DB(), Now: clock, OnDeep: pl.OnDeep}
 
-	snd := &Sender{DB: st.DB(), Conns: conns, Factories: map[string]dest.Factory{}}
+	snd := &Sender{DB: st.DB(), Conns: conns, Factories: map[string]dest.Factory{}, Now: clock}
 	for _, k := range []string{Miniflux, Karakeep, MeTube} {
 		k := k
 		snd.Factories[k] = func(baseURL, secret string, _ json.RawMessage) dest.Destination {
@@ -422,5 +423,59 @@ func TestConnectionWithoutSecretFailsAtOnce(t *testing.T) {
 	_ = f.st.DB().QueryRow(`SELECT status, last_error FROM outbox WHERE op = 'karakeep'`).Scan(&status, &lastErr)
 	if status != "failed" || !strings.Contains(lastErr, "no secret") {
 		t.Fatalf("%s %q", status, lastErr)
+	}
+}
+
+func (f *fixture) connState(user, kind string) (state, detail, via string) {
+	f.t.Helper()
+	var st sql.NullString
+	if err := f.st.DB().QueryRow(`SELECT check_state, check_detail, check_via FROM connections WHERE user_id = ? AND kind = ?`, user, kind).Scan(&st, &detail, &via); err != nil {
+		f.t.Fatal(err)
+	}
+	return st.String, detail, via
+}
+
+func TestSenderRecordsConnectionStatus(t *testing.T) {
+	f := newFixture(t)
+	f.connect("u1", Miniflux, Karakeep)
+	f.item("i1", "src1", "article", "light", "41")
+	f.act("keep", "i1")
+	f.release()
+	f.fail[Karakeep] = fmt.Errorf("POST x: %w", &dest.StatusError{Code: 401})
+	f.drain()
+	if state, _, via := f.connState("u1", Karakeep); state != "auth" || via != "outbox" {
+		t.Fatalf("%q %q", state, via)
+	}
+	delete(f.fail, Karakeep)
+	f.now = f.now.Add(outbox.Backoff(1) + time.Second)
+	f.drain()
+	if state, _, _ := f.connState("u1", Karakeep); state != "ok" {
+		t.Fatalf("state = %q", state)
+	}
+}
+
+func TestSenderIgnoresItemLevelErrors(t *testing.T) {
+	f := newFixture(t)
+	f.connect("u1", Miniflux, Karakeep)
+	f.item("i1", "src1", "article", "light", "41")
+	f.act("keep", "i1")
+	f.release()
+	f.fail[Karakeep] = dest.Permanent(errors.New("no bookmark to update"))
+	f.drain()
+	if state, _, _ := f.connState("u1", Karakeep); state != "" {
+		t.Fatalf("state = %q", state)
+	}
+}
+
+func TestSenderRecordsMissingSecret(t *testing.T) {
+	f := newFixture(t)
+	f.connect("u1", Miniflux, Karakeep)
+	f.exec(`UPDATE connections SET secret_enc = NULL WHERE kind = 'karakeep'`)
+	f.item("i1", "src1", "article", "light", "41")
+	f.act("keep", "i1")
+	f.release()
+	f.drain()
+	if state, detail, _ := f.connState("u1", Karakeep); state != "auth" || detail != "No key is saved." {
+		t.Fatalf("%q %q", state, detail)
 	}
 }

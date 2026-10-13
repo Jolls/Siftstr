@@ -372,3 +372,45 @@ func TestListSessionsScopedAndFiltered(t *testing.T) {
 		t.Fatalf("other token: %+v", got)
 	}
 }
+
+func TestShortExistingPasswordStillAuthenticates(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	u, err := s.CreateUser(ctx, "alice", "password-one", RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, _ := HashPassword("eight-ch")
+	if _, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, h, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Authenticate(ctx, "alice", "eight-ch", "1.1.1.1"); err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+}
+
+func TestPasswordMinimumIsTwelve(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	if _, err := s.CreateUser(ctx, "bob", "elevenchars", RoleUser); !errors.Is(err, ErrWeakPassword) {
+		t.Errorf("11 chars: %v", err)
+	}
+	if _, err := s.CreateUser(ctx, "bob", "twelve-chars", RoleUser); err != nil {
+		t.Errorf("12 chars: %v", err)
+	}
+	if err := s.SetPassword(ctx, "bob", "elevenchars"); !errors.Is(err, ErrWeakPassword) {
+		t.Errorf("set 11 chars: %v", err)
+	}
+	if !strings.Contains(ErrWeakPassword.Error(), "12") {
+		t.Errorf("message = %q", ErrWeakPassword)
+	}
+	s2, _ := newService(t)
+	if _, err := s2.Bootstrap(ctx, "admin", "elevenchars"); !errors.Is(err, ErrWeakPassword) {
+		t.Errorf("bootstrap 11 chars: %v", err)
+	}
+	var n int
+	_ = s2.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
+	if n != 0 {
+		t.Errorf("%d users created", n)
+	}
+}
