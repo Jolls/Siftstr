@@ -1,0 +1,326 @@
+/* Accent colors (#36). The server renders data-accent="<name>" on <html> for any accent but jade; no attribute means jade.
+   Values are Pico v2.1.1's own (pico.<name>.min.css), except --accent-dark-hover-background, which uses the darker
+   light-theme shade wherever Pico's was below 4.5:1 against the button text. Inline styles are blocked by the CSP,
+   so the values live here. Status badge colors (app.css) do not follow the accent. */
+
+:root,
+[data-accent="jade"] {
+  --accent-background: #007a50;
+  --accent-inverse: #fff;
+  --accent-light-primary: #007a50;
+  --accent-light-underline: rgba(0, 122, 80, .5);
+  --accent-light-hover: #005f3d;
+  --accent-light-hover-background: #006d46;
+  --accent-light-focus: rgba(0, 166, 110, .5);
+  --accent-light-selection: rgba(0, 166, 110, .25);
+  --accent-dark-primary: #00b478;
+  --accent-dark-underline: rgba(0, 180, 120, .5);
+  --accent-dark-hover: #00cc88;
+  --accent-dark-hover-background: #006d46;
+  --accent-dark-focus: rgba(0, 180, 120, .375);
+  --accent-dark-selection: rgba(0, 180, 120, .1875);
+  --accent-switch-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+[data-accent="red"] {
+  --accent-background: #c52f21;
+  --accent-inverse: #fff;
+  --accent-light-primary: #c52f21;
+  --accent-light-underline: rgba(197, 47, 33, .5);
+  --accent-light-hover: #9b2318;
+  --accent-light-hover-background: #af291d;
+  --accent-light-focus: rgba(240, 96, 72, .5);
+  --accent-light-selection: rgba(240, 96, 72, .25);
+  --accent-dark-primary: #f17961;
+  --accent-dark-underline: rgba(241, 121, 97, .5);
+  --accent-dark-hover: #f5a390;
+  --accent-dark-hover-background: #d93526;
+  --accent-dark-focus: rgba(241, 121, 97, .375);
+  --accent-dark-selection: rgba(241, 121, 97, .1875);
+}
+
+[data-accent="pink"] {
+  --accent-background: #d92662;
+  --accent-inverse: #fff;
+  --accent-light-primary: #c72259;
+  --accent-light-underline: rgba(199, 34, 89, .5);
+  --accent-light-hover: #9d1945;
+  --accent-light-hover-background: #c72259;
+  --accent-light-focus: rgba(246, 84, 126, .5);
+  --accent-light-selection: rgba(246, 84, 126, .25);
+  --accent-dark-primary: #f7708e;
+  --accent-dark-underline: rgba(247, 112, 142, .5);
+  --accent-dark-hover: #f99eae;
+  --accent-dark-hover-background: #c72259;
+  --accent-dark-focus: rgba(247, 112, 142, .375);
+  --accent-dark-selection: rgba(247, 112, 142, .1875);
+}
+
+[data-accent="fuchsia"] {
+  --accent-background: #c1208b;
+  --accent-inverse: #fff;
+  --accent-light-primary: #c1208b;
+  --accent-light-underline: rgba(193, 32, 139, .5);
+  --accent-light-hover: #98176d;
+  --accent-light-hover-background: #ac1c7c;
+  --accent-light-focus: rgba(247, 72, 183, .5);
+  --accent-light-selection: rgba(247, 72, 183, .25);
+  --accent-dark-primary: #f869bf;
+  --accent-dark-underline: rgba(248, 105, 191, .5);
+  --accent-dark-hover: #fa9acf;
+  --accent-dark-hover-background: #ac1c7c;
+  --accent-dark-focus: rgba(248, 105, 191, .375);
+  --accent-dark-selection: rgba(248, 105, 191, .1875);
+}
+
+[data-accent="purple"] {
+  --accent-background: #9236a4;
+  --accent-inverse: #fff;
+  --accent-light-primary: #aa40bf;
+  --accent-light-underline: rgba(170, 64, 191, .5);
+  --accent-light-hover: #802e90;
+  --accent-light-hover-background: #802e90;
+  --accent-light-focus: rgba(205, 104, 224, .5);
+  --accent-light-selection: rgba(205, 104, 224, .25);
+  --accent-dark-primary: #d47de4;
+  --accent-dark-underline: rgba(212, 125, 228, .5);
+  --accent-dark-hover: #e2a3eb;
+  --accent-dark-hover-background: #aa40bf;
+  --accent-dark-focus: rgba(212, 125, 228, .375);
+  --accent-dark-selection: rgba(212, 125, 228, .1875);
+}
+
+[data-accent="violet"] {
+  --accent-background: #7540bf;
+  --accent-inverse: #fff;
+  --accent-light-primary: #8352c5;
+  --accent-light-underline: rgba(131, 82, 197, .5);
+  --accent-light-hover: #6935b3;
+  --accent-light-hover-background: #6935b3;
+  --accent-light-focus: rgba(167, 128, 212, .5);
+  --accent-light-selection: rgba(167, 128, 212, .25);
+  --accent-dark-primary: #b290d9;
+  --accent-dark-underline: rgba(178, 144, 217, .5);
+  --accent-dark-hover: #c9afe4;
+  --accent-dark-hover-background: #8352c5;
+  --accent-dark-focus: rgba(178, 144, 217, .375);
+  --accent-dark-selection: rgba(178, 144, 217, .1875);
+}
+
+[data-accent="indigo"] {
+  --accent-background: #524ed2;
+  --accent-inverse: #fff;
+  --accent-light-primary: #655cd6;
+  --accent-light-underline: rgba(101, 92, 214, .5);
+  --accent-light-hover: #4040bf;
+  --accent-light-hover-background: #4040bf;
+  --accent-light-focus: rgba(148, 134, 225, .5);
+  --accent-light-selection: rgba(148, 134, 225, .25);
+  --accent-dark-primary: #a294e5;
+  --accent-dark-underline: rgba(162, 148, 229, .5);
+  --accent-dark-hover: #bdb2ec;
+  --accent-dark-hover-background: #655cd6;
+  --accent-dark-focus: rgba(162, 148, 229, .375);
+  --accent-dark-selection: rgba(162, 148, 229, .1875);
+}
+
+[data-accent="blue"] {
+  --accent-background: #2060df;
+  --accent-inverse: #fff;
+  --accent-light-primary: #2060df;
+  --accent-light-underline: rgba(32, 96, 223, .5);
+  --accent-light-hover: #184eb8;
+  --accent-light-hover-background: #1d59d0;
+  --accent-light-focus: rgba(116, 139, 248, .5);
+  --accent-light-selection: rgba(116, 139, 248, .25);
+  --accent-dark-primary: #8999f9;
+  --accent-dark-underline: rgba(137, 153, 249, .5);
+  --accent-dark-hover: #aeb5fb;
+  --accent-dark-hover-background: #1d59d0;
+  --accent-dark-focus: rgba(137, 153, 249, .375);
+  --accent-dark-selection: rgba(137, 153, 249, .1875);
+}
+
+[data-accent="azure"] {
+  --accent-background: #0172ad;
+  --accent-inverse: #fff;
+  --accent-light-primary: #0172ad;
+  --accent-light-underline: rgba(1, 114, 173, .5);
+  --accent-light-hover: #015887;
+  --accent-light-hover-background: #02659a;
+  --accent-light-focus: rgba(2, 154, 232, .5);
+  --accent-light-selection: rgba(2, 154, 232, .25);
+  --accent-dark-primary: #01aaff;
+  --accent-dark-underline: rgba(1, 170, 255, .5);
+  --accent-dark-hover: #79c0ff;
+  --accent-dark-hover-background: #02659a;
+  --accent-dark-focus: rgba(1, 170, 255, .375);
+  --accent-dark-selection: rgba(1, 170, 255, .1875);
+}
+
+[data-accent="cyan"] {
+  --accent-background: #047878;
+  --accent-inverse: #fff;
+  --accent-light-primary: #047878;
+  --accent-light-underline: rgba(4, 120, 120, .5);
+  --accent-light-hover: #025d5d;
+  --accent-light-hover-background: #046a6a;
+  --accent-light-focus: rgba(5, 162, 162, .5);
+  --accent-light-selection: rgba(5, 162, 162, .25);
+  --accent-dark-primary: #0ab1b1;
+  --accent-dark-underline: rgba(10, 177, 177, .5);
+  --accent-dark-hover: #0ccece;
+  --accent-dark-hover-background: #046a6a;
+  --accent-dark-focus: rgba(10, 177, 177, .375);
+  --accent-dark-selection: rgba(10, 177, 177, .1875);
+}
+
+[data-accent="green"] {
+  --accent-background: #398712;
+  --accent-inverse: #fff;
+  --accent-light-primary: #33790f;
+  --accent-light-underline: rgba(51, 121, 15, .5);
+  --accent-light-hover: #265e09;
+  --accent-light-hover-background: #33790f;
+  --accent-light-focus: rgba(71, 164, 23, .5);
+  --accent-light-selection: rgba(71, 164, 23, .25);
+  --accent-dark-primary: #4eb31b;
+  --accent-dark-underline: rgba(78, 179, 27, .5);
+  --accent-dark-hover: #5dd121;
+  --accent-dark-hover-background: #33790f;
+  --accent-dark-focus: rgba(78, 179, 27, .375);
+  --accent-dark-selection: rgba(78, 179, 27, .1875);
+}
+
+[data-accent="lime"] {
+  --accent-background: #a5d601;
+  --accent-inverse: #000;
+  --accent-light-primary: #577400;
+  --accent-light-underline: rgba(87, 116, 0, .5);
+  --accent-light-hover: #435a00;
+  --accent-light-hover-background: #99c801;
+  --accent-light-focus: rgba(119, 156, 0, .5);
+  --accent-light-selection: rgba(119, 156, 0, .25);
+  --accent-dark-primary: #82ab00;
+  --accent-dark-underline: rgba(130, 171, 0, .5);
+  --accent-dark-hover: #99c801;
+  --accent-dark-hover-background: #b2e51a;
+  --accent-dark-focus: rgba(130, 171, 0, .375);
+  --accent-dark-selection: rgba(130, 171, 0, .1875);
+  --accent-switch-shadow: 0 0 0.5rem rgba(0, 0, 0, 0.25);
+}
+
+[data-accent="yellow"] {
+  --accent-background: #f2df0d;
+  --accent-inverse: #000;
+  --accent-light-primary: #756b00;
+  --accent-light-underline: rgba(117, 107, 0, .5);
+  --accent-light-hover: #5b5300;
+  --accent-light-hover-background: #e8d600;
+  --accent-light-focus: rgba(158, 146, 0, .5);
+  --accent-light-selection: rgba(158, 146, 0, .25);
+  --accent-dark-primary: #ad9f00;
+  --accent-dark-underline: rgba(173, 159, 0, .5);
+  --accent-dark-hover: #caba01;
+  --accent-dark-hover-background: #f8e861;
+  --accent-dark-focus: rgba(173, 159, 0, .375);
+  --accent-dark-selection: rgba(173, 159, 0, .1875);
+  --accent-switch-shadow: 0 0 0.5rem rgba(0, 0, 0, 0.25);
+}
+
+[data-accent="amber"] {
+  --accent-background: #ffbf00;
+  --accent-inverse: #000;
+  --accent-light-primary: #876400;
+  --accent-light-underline: rgba(135, 100, 0, .5);
+  --accent-light-hover: #694d00;
+  --accent-light-hover-background: #e8ae01;
+  --accent-light-focus: rgba(183, 136, 0, .5);
+  --accent-light-selection: rgba(183, 136, 0, .25);
+  --accent-dark-primary: #c79400;
+  --accent-dark-underline: rgba(199, 148, 0, .5);
+  --accent-dark-hover: #e8ae01;
+  --accent-dark-hover-background: #fecc63;
+  --accent-dark-focus: rgba(199, 148, 0, .375);
+  --accent-dark-selection: rgba(199, 148, 0, .1875);
+  --accent-switch-shadow: 0 0 0.5rem rgba(0, 0, 0, 0.25);
+}
+
+[data-accent="pumpkin"] {
+  --accent-background: #ff9500;
+  --accent-inverse: #000;
+  --accent-light-primary: #9c5900;
+  --accent-light-underline: rgba(156, 89, 0, .5);
+  --accent-light-hover: #7a4400;
+  --accent-light-hover-background: #e48500;
+  --accent-light-focus: rgba(210, 122, 1, .5);
+  --accent-light-selection: rgba(210, 122, 1, .25);
+  --accent-dark-primary: #e48500;
+  --accent-dark-underline: rgba(228, 133, 0, .5);
+  --accent-dark-hover: #ffa23a;
+  --accent-dark-hover-background: #ffa23a;
+  --accent-dark-focus: rgba(228, 133, 0, .375);
+  --accent-dark-selection: rgba(228, 133, 0, .1875);
+  --accent-switch-shadow: 0 0 0.5rem rgba(0, 0, 0, 0.25);
+}
+
+[data-accent="orange"] {
+  --accent-background: #d24317;
+  --accent-inverse: #fff;
+  --accent-light-primary: #bd3c13;
+  --accent-light-underline: rgba(189, 60, 19, .5);
+  --accent-light-hover: #942d0d;
+  --accent-light-hover-background: #bd3c13;
+  --accent-light-focus: rgba(244, 93, 44, .5);
+  --accent-light-selection: rgba(244, 93, 44, .25);
+  --accent-dark-primary: #f56b3d;
+  --accent-dark-underline: rgba(245, 107, 61, .5);
+  --accent-dark-hover: #f8a283;
+  --accent-dark-hover-background: #bd3c13;
+  --accent-dark-focus: rgba(245, 107, 61, .375);
+  --accent-dark-selection: rgba(245, 107, 61, .1875);
+}
+
+/* Map the chosen accent onto Pico, the way Pico itself picks light, dark and follow-the-device. */
+:root:not([data-theme="dark"]) {
+  --pico-text-selection-color: var(--accent-light-selection);
+  --pico-primary: var(--accent-light-primary);
+  --pico-primary-background: var(--accent-background);
+  --pico-primary-underline: var(--accent-light-underline);
+  --pico-primary-hover: var(--accent-light-hover);
+  --pico-primary-hover-background: var(--accent-light-hover-background);
+  --pico-primary-focus: var(--accent-light-focus);
+  --pico-primary-inverse: var(--accent-inverse);
+  --pico-switch-thumb-box-shadow: var(--accent-switch-shadow);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --pico-text-selection-color: var(--accent-dark-selection);
+    --pico-primary: var(--accent-dark-primary);
+    --pico-primary-background: var(--accent-background);
+    --pico-primary-underline: var(--accent-dark-underline);
+    --pico-primary-hover: var(--accent-dark-hover);
+    --pico-primary-hover-background: var(--accent-dark-hover-background);
+    --pico-primary-focus: var(--accent-dark-focus);
+    --pico-primary-inverse: var(--accent-inverse);
+    --pico-switch-thumb-box-shadow: var(--accent-switch-shadow);
+  }
+}
+:root[data-theme="dark"] {
+  --pico-text-selection-color: var(--accent-dark-selection);
+  --pico-primary: var(--accent-dark-primary);
+  --pico-primary-background: var(--accent-background);
+  --pico-primary-underline: var(--accent-dark-underline);
+  --pico-primary-hover: var(--accent-dark-hover);
+  --pico-primary-hover-background: var(--accent-dark-hover-background);
+  --pico-primary-focus: var(--accent-dark-focus);
+  --pico-primary-inverse: var(--accent-inverse);
+  --pico-switch-thumb-box-shadow: var(--accent-switch-shadow);
+}
+
+/* The light accents keep Pico's dark spinner and summary icon. */
+:root:is([data-accent="amber"], [data-accent="lime"], [data-accent="pumpkin"], [data-accent="yellow"]) details summary[role=button]:not(.outline)::after,
+:root:is([data-accent="amber"], [data-accent="lime"], [data-accent="pumpkin"], [data-accent="yellow"]) [aria-busy=true]:not(input, select, textarea):is(button, [type=submit], [type=button], [type=reset], [role=button]):not(.outline)::before { filter: brightness(0) invert(0); }
+
+/* The color dot beside each choice on the Appearance page. */
+.accent-swatch { display: inline-block; width: 1em; height: 1em; margin-inline-end: 0.25rem; border-radius: 50%; vertical-align: -0.125em; background: var(--accent-background); }

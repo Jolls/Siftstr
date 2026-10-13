@@ -53,7 +53,7 @@ internal/dest/          miniflux/, karakeep/, metube/, youtube/  (Destination im
 internal/outbox/        queue and workers
 internal/janitor/       six-month cleanup and the daily database snapshot
 internal/store/         SQLite access and embedded migrations
-web/static/             Pico.css (pico.jade.min.css), app.css, later htmx, gestures.js, queue.js (action queue + sender)
+web/static/             Pico.css (pico.jade.min.css), accents.css (per-user accent colors), app.css, later htmx, gestures.js, queue.js (action queue + sender)
 web/templates/          html/template files (base, login, items); embedded via web/embed.go
 docs/                   API.md and other specs
 scripts/                CI and dev helper scripts (check-changelog.sh)

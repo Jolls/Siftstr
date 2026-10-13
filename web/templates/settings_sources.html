@@ -17,31 +17,6 @@
     <button type="submit">Save</button>
   </form>
 </article>
-<article class="display">
-  <form method="post" action="/settings/display">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <fieldset>
-      <legend>List direction on a phone</legend>
-      <label><input type="radio" name="phone_flow" value="up"{{if ne .PhoneFlow "down"}} checked{{end}}> Bottom-up: the card to sift sits at the bottom, by your thumb, and the next one comes down from above</label>
-      <label><input type="radio" name="phone_flow" value="down"{{if eq .PhoneFlow "down"}} checked{{end}}> Top-down: the usual list, the next card scrolls up from below</label>
-    </fieldset>
-    <small>Only changes the layout on a narrow screen. Desktop is always top-down.</small>
-    <button type="submit">Save</button>
-  </form>
-</article>
-<article class="theme">
-  <form method="post" action="/settings/theme">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <fieldset>
-      <legend>Theme</legend>
-      <label><input type="radio" name="theme" value="auto"{{if and (ne .Theme "light") (ne .Theme "dark")}} checked{{end}}> Follow the device: light or dark, as your phone or computer is set</label>
-      <label><input type="radio" name="theme" value="light"{{if eq .Theme "light"}} checked{{end}}> Light</label>
-      <label><input type="radio" name="theme" value="dark"{{if eq .Theme "dark"}} checked{{end}}> Dark</label>
-    </fieldset>
-    <small>Applies on every device you sign in on. The sign-in page always follows the device.</small>
-    <button type="submit">Save</button>
-  </form>
-</article>
 <article class="ingest">
   <form method="post" action="/settings/ingest">
     <input type="hidden" name="csrf" value="{{.CSRF}}">

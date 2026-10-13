@@ -25,6 +25,9 @@ type Page struct {
 	// Theme is the signed-in user's colour theme: "auto", "light" or "dark".
 	// Empty (logged out) behaves as auto. base.html sets data-theme only for light or dark.
 	Theme string
+	// Accent is the signed-in user's accent color (triage.Accents). Empty (logged out) or "jade"
+	// renders no data-accent, so Pico's jade applies.
+	Accent string
 
 	// Item list pages (/today, /backlog).
 	Heading string
@@ -32,24 +35,25 @@ type Page struct {
 	Items   []Item
 
 	// Settings pages.
-	Notice       string // one-line confirmation, e.g. "Saved."
-	Sources      []SourceRow
-	Ingest       IngestForm
-	Timezone     string
-	PhoneFlow    string // "up" or "down": list direction on a phone (item lists and /settings/sources)
-	ZoneGroups   []ZoneGroup
-	Keys         []KeyRow
-	Sessions     []SessionRow // /settings/sessions
-	IdleDays     int          // /settings/sessions: auth.SessionIdleTimeout in days
-	LifetimeDays int          // /settings/sessions: auth.SessionLifetime in days
-	NewKey       string       // a just-created API key, shown once
-	Prompts      []PromptField
-	Destinations []Destination
-	NostrRelays  string // /settings/nostr: one relay per line
-	NostrNpubs   string // one npub per line
-	NostrSaved   bool   // a Nostr connection exists
-	Keep         []KeepChoice
-	Activity     []ActivityRow
+	Notice        string // one-line confirmation, e.g. "Saved."
+	Sources       []SourceRow
+	Ingest        IngestForm
+	Timezone      string
+	AccentOptions []AccentOption // /settings/appearance
+	PhoneFlow     string         // "up" or "down": list direction on a phone (item lists and /settings/appearance)
+	ZoneGroups    []ZoneGroup
+	Keys          []KeyRow
+	Sessions      []SessionRow // /settings/sessions
+	IdleDays      int          // /settings/sessions: auth.SessionIdleTimeout in days
+	LifetimeDays  int          // /settings/sessions: auth.SessionLifetime in days
+	NewKey        string       // a just-created API key, shown once
+	Prompts       []PromptField
+	Destinations  []Destination
+	NostrRelays   string // /settings/nostr: one relay per line
+	NostrNpubs    string // one npub per line
+	NostrSaved    bool   // a Nostr connection exists
+	Keep          []KeepChoice
+	Activity      []ActivityRow
 
 	// The /read page.
 	Day     string
@@ -153,6 +157,9 @@ type User struct {
 	Name string
 }
 
+// AccentOption is one radio on /settings/appearance.
+type AccentOption struct{ Value, Label string }
+
 // Item is one triage card.
 type Item struct {
 	ID         string
@@ -181,6 +188,7 @@ var pageFiles = map[string][]string{
 	"items":                 {"items.html"},
 	"read":                  {"read.html"},
 	"settings_sources":      {"settings_nav.html", "settings_sources.html"},
+	"settings_appearance":   {"settings_nav.html", "settings_appearance.html"},
 	"settings_destinations": {"settings_nav.html", "settings_destinations.html"},
 	"settings_prompts":      {"settings_nav.html", "settings_prompts.html"},
 	"settings_keys":         {"settings_nav.html", "settings_keys.html"},
