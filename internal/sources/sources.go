@@ -158,6 +158,10 @@ const (
 	// user_settings keys of the two values above.
 	SettingSummaryDelayMinutes = "karakeep_summary_delay_minutes"
 	SettingSummaryTimeoutHours = "karakeep_summary_timeout_hours"
+
+	// SettingHighlights is the user_settings key that turns on the daily
+	// Karakeep highlight in the briefing ("1" or "0"; off by default).
+	SettingHighlights = "karakeep_highlights"
 )
 
 // IngestSettings are the user-level knobs that apply to every source.
@@ -167,6 +171,8 @@ type IngestSettings struct {
 
 	KarakeepSummaryDelayMinutes int // Claude's summary waits this long after the bookmark is made
 	KarakeepSummaryTimeoutHours int // give up on Karakeep's summary after this long
+
+	KarakeepHighlights bool // show one Karakeep highlight at the top of each day's briefing
 }
 
 // Validate bounds both values.
@@ -190,7 +196,7 @@ func (s *Service) Ingest(ctx context.Context, userID string) (IngestSettings, er
 		KarakeepSummaryDelayMinutes: DefaultSummaryDelayMinutes, KarakeepSummaryTimeoutHours: DefaultSummaryTimeoutHours}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT key, value FROM user_settings WHERE user_id = ?
-		 AND key IN ('excerpt_length', 'max_age_days', ?, ?)`, userID, SettingSummaryDelayMinutes, SettingSummaryTimeoutHours)
+		 AND key IN ('excerpt_length', 'max_age_days', ?, ?, ?)`, userID, SettingSummaryDelayMinutes, SettingSummaryTimeoutHours, SettingHighlights)
 	if err != nil {
 		return out, err
 	}
@@ -213,6 +219,8 @@ func (s *Service) Ingest(ctx context.Context, userID string) (IngestSettings, er
 			out.KarakeepSummaryDelayMinutes = n
 		case SettingSummaryTimeoutHours:
 			out.KarakeepSummaryTimeoutHours = n
+		case SettingHighlights:
+			out.KarakeepHighlights = n == 1
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -244,9 +252,14 @@ func (s *Service) SetIngest(ctx context.Context, userID string, in IngestSetting
 		return err
 	}
 	defer tx.Rollback()
+	highlights := 0
+	if in.KarakeepHighlights {
+		highlights = 1
+	}
 	for k, v := range map[string]int{
 		"excerpt_length": in.ExcerptLength, "max_age_days": in.MaxAgeDays,
 		SettingSummaryDelayMinutes: in.KarakeepSummaryDelayMinutes, SettingSummaryTimeoutHours: in.KarakeepSummaryTimeoutHours,
+		SettingHighlights: highlights,
 	} {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)

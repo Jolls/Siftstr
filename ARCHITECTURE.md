@@ -98,7 +98,8 @@ In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped
 | Nostr ingestor | On the ingest timer, opens a short subscription to each of the user's relays for the followed npubs, reads until the relay signals end of stored events, and closes it. Drops events with a bad ID or signature or from an unfollowed key, skips replies, and dedupes by event ID. Items link to a public viewer (`njump.me`) because events have no URL of their own. |
 | Work dispenser | When Claude asks for work, applies carryover, then builds the work package from whatever is in the database: digest bundles and promoted items waiting for a deep summary, with resolved prompts. Promoted items from `karakeep` sources are not included. |
 | Karakeep summary poller | In the same job, right after the ingestor: reads the Karakeep bookmark of each `pending_deep` item from a `karakeep` source whose promote can no longer be undone, and stores its summary when one appears (§5, §6) |
-| Briefing builder | Once summaries arrive, assembles the day's briefing (Today + Backlog) and writes the markdown file |
+| Highlights job | For users who turned on Karakeep highlights: caches the IDs of their Karakeep highlights and picks one a day for the briefing (§8). Read-only towards Karakeep. |
+| Briefing builder | Once summaries arrive, assembles the day's briefing (Today + Backlog, with the day's highlight first under Today) and writes the markdown file |
 | Action log and triage service | Stores incoming actions idempotently, runs the item state machine, handles undo by cancelling held effects |
 | Write-back outbox | Holds each action's upstream effects for the grace period, then sends them, with retry |
 | Destination adapters | Miniflux, Karakeep, MeTube, behind a common interface |
@@ -293,7 +294,11 @@ type Destination interface {
 - **Ingest timers** (every 30 minutes, one per ingestor): keep adding new Miniflux entries and Nostr events to the database as `light`, ready to triage at once, on the user's local day they were ingested (digest entries as `pending_light`, summarized at the next morning run). A source set to use Karakeep summaries also gets its archived Karakeep bookmark queued in the outbox at this point. Nothing triggers ingestion on demand.
 - **Release timer** (e.g. every minute): releases actions whose hold has ended and sends their write-backs.
 - **Karakeep job** (every 30 minutes, per user, skipped for users with no Karakeep connection): first lists unarchived Karakeep bookmarks and offers new ones as `light` items (§6), then, for each `pending_deep` item from a `karakeep` source, reads the bookmark's summary and moves the item to `deep` when it appears, or when Karakeep reports failure or the timeout passes (§5). One job rather than two timers, because a 30-minute wait for a promoted card is acceptable (the summary is normally there already) and it keeps one pass over one connection. An item whose promote is still in its undo hold is skipped, so an undo is never refused because the summary happened to arrive.
-- **Janitor** (daily, per user; also once at startup): deletes the user's workflow rows older than 6 months, by `created_at`: items (including ones never triaged, see Q16), actions (`received_at`), outbox entries, runs with their `run_items` (`started_at`), digests with no remaining items (`batch_date`, since they have no `created_at`), and expired sessions. It never touches sources, connections or settings, and a second run the same day deletes nothing. Because the source entry stays unread upstream, a deleted item can be ingested again if it is still inside the source's `max_age_days` window.
+- **Highlights job** (hourly, per user; also once at startup; does nothing unless the user turned on `karakeep_highlights` and has a Karakeep connection). Karakeep has no count or random pick for highlights and its IDs are random strings, so this job caches them and picks from the cache. It has two parts:
+  - *Refresh*, on the first run after a start and then weekly while Siftstr keeps running: walks `GET /api/v1/highlights` in pages of 100 (capped at 100 pages) and stores every highlight that has text in `highlight_cache`. The whole list is read before anything is written, so a failed walk changes nothing. A walk that reached the end also removes cached highlights Karakeep no longer has; one stopped by the page cap only adds. If the walk fails, the pick below still uses what is stored.
+  - *Pick*, once per user-local day: if `highlight_picks` has no row for today, chooses a random cached highlight that has not been shown yet (when all have been shown, the record is cleared and they start again), reads it and its bookmark from Karakeep, and stores the text, note, color, bookmark title, link and byline with the day. A highlight or bookmark Karakeep no longer has is dropped from the cache and another is tried (up to 5). If the bookmark cannot be read the highlight is stored without a title or link; if the highlight cannot be read the day has no highlight and the next run tries again.
+  The pick is made here, never while a page loads, and is stored so that rewriting the day's file, or the closing pass, shows the same highlight. It is not an item: it has no state and nothing can be done with it. The ID cache and the picks are workflow state; picks are deleted with the rest after 6 months.
+- **Janitor** (daily, per user; also once at startup): deletes the user's workflow rows older than 6 months, by `created_at`: items (including ones never triaged, see Q16), actions (`received_at`), outbox entries, runs with their `run_items` (`started_at`), highlight picks (`day`), digests with no remaining items (`batch_date`, since they have no `created_at`), and expired sessions. It never touches sources, connections or settings, and a second run the same day deletes nothing. Because the source entry stays unread upstream, a deleted item can be ingested again if it is still inside the source's `max_age_days` window.
 - **Backup** (daily, instance-wide; also once at startup): `VACUUM INTO` writes `/data/backups/siftstr-YYYY-MM-DD.db` (UTC day) through a temp file and a rename, skips the day if the file exists, and keeps the newest 7 (Q22).
 
 ### Morning: the one Claude scheduled task (e.g. 06:00)
@@ -320,6 +325,7 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 - It is generated from the same data and template as `/read`, so the file matches what the user saw.
 - It lives at `/data/briefings/<username>/YYYY-MM-DD.md` (the day is the user's local date), written atomically so a sync client never sees half a file. A failed write is logged and never fails the run or the summary submission.
 - Layout: YAML frontmatter (`date`, `today`, `backlog`, `final`), then `## Today` and `## Backlog`, one `###` entry per item or digest (linked title, source and media type, outcome, then the summary, or the excerpt as a quote when there is no summary yet). A digest always has a summary; a promoted item gets its summary at the next rewrite, not live (Q25). The summaries are Claude's or Karakeep's markdown, inserted as is.
+- Highlight: when the user has one for the day (§8), it is the first entry under `## Today`, as a `### Highlight` entry with the passage as a quote, the note if there is one, and a `From` line naming and linking the bookmark. It is not counted in `today:`. `/read` shows it first in Today the same way, as an `<article>` with no controls.
 - Outcomes: deleted, archived (deleted after a promote), kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
 - Closing: `POST /api/v1/runs` runs carryover and then rewrites every earlier summarized day not yet closed with `final: true`. The last closed day is remembered in `user_settings` (`briefing_finalized_day`); the file is never read back.
 - `/read` renders the same Today and Backlog from the same query: headings and `<article>` only, with no buttons, forms or badges in the text flow.
@@ -406,13 +412,21 @@ outbox         id, user_id, action_id (null for ingest-driven entries), connecti
 
 runs           id, user_id, started_at, summaries_at, finished_at, stats
 
+highlight_cache  user_id, highlight_id, bookmark_id, shown_on   -- PK(user_id, highlight_id)
+                 -- IDs of the user's Karakeep highlights that have text;
+                 -- shown_on = the local day it was last picked
+highlight_picks  user_id, day, highlight_id, text, note, color, bookmark_title,
+                 bookmark_url, byline, created_at               -- PK(user_id, day)
+                 -- the day's highlight, copied so a rewritten briefing reads the same
+
 -- settings
 user_settings      user_id, key, value   -- global prompt, video destinations,
                                          -- phone_flow, theme (auto|light|dark),
                                          -- accent (jade by default, or one of the offered Pico color families),
                                          -- excerpt length, export path,
                                          -- karakeep_summary_delay_minutes,
-                                         -- karakeep_summary_timeout_hours
+                                         -- karakeep_summary_timeout_hours,
+                                         -- karakeep_highlights (1 = on; off by default)
 instance_settings  key, value            -- timer intervals, grace period,
                                          -- retention (6 months)
 ```

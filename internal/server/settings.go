@@ -65,7 +65,8 @@ func (s *server) renderSources(w http.ResponseWriter, req *http.Request, sess *s
 		p.ZoneGroups = append(p.ZoneGroups, ui.ZoneGroup{Region: g.Region, Zones: g.Zones})
 	}
 	p.Ingest = ui.IngestForm{ExcerptLength: ing.ExcerptLength, MaxAgeDays: ing.MaxAgeDays,
-		KarakeepSummaryDelayMinutes: ing.KarakeepSummaryDelayMinutes, KarakeepSummaryTimeoutHours: ing.KarakeepSummaryTimeoutHours}
+		KarakeepSummaryDelayMinutes: ing.KarakeepSummaryDelayMinutes, KarakeepSummaryTimeoutHours: ing.KarakeepSummaryTimeoutHours,
+		KarakeepHighlights: ing.KarakeepHighlights}
 	for _, x := range list {
 		p.Sources = append(p.Sources, ui.SourceRow{
 			ID: x.ID, Name: x.Name, Category: x.Category, Kind: x.Kind,
@@ -116,6 +117,12 @@ func (s *server) ingestSave(w http.ResponseWriter, req *http.Request, sess *sess
 		return
 	}
 	in.KarakeepSummaryDelayMinutes, in.KarakeepSummaryTimeoutHours = cur.KarakeepSummaryDelayMinutes, cur.KarakeepSummaryTimeoutHours
+	// An unchecked box is not sent, so the form carries a marker; without it
+	// the saved choice stays.
+	in.KarakeepHighlights = cur.KarakeepHighlights
+	if req.PostFormValue("highlights_form") != "" {
+		in.KarakeepHighlights = req.PostFormValue("karakeep_highlights") != ""
+	}
 	for name, dst := range map[string]*int{"karakeep_summary_delay_minutes": &in.KarakeepSummaryDelayMinutes, "karakeep_summary_timeout_hours": &in.KarakeepSummaryTimeoutHours} {
 		if v := strings.TrimSpace(req.PostFormValue(name)); v != "" {
 			n, err := strconv.Atoi(v)

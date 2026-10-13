@@ -36,7 +36,7 @@ type Janitor struct {
 
 // Result counts the rows a prune deleted.
 type Result struct {
-	Items, Digests, Actions, Outbox, Runs int64
+	Items, Digests, Actions, Outbox, Runs, Highlights int64
 }
 
 func (j *Janitor) now() time.Time {
@@ -76,6 +76,7 @@ func (j *Janitor) Prune(ctx context.Context, userID string) (Result, error) {
 		{&res.Outbox, `DELETE FROM outbox WHERE user_id = ? AND created_at < ?`, []any{userID, ts}},
 		{&res.Actions, `DELETE FROM actions WHERE user_id = ? AND received_at < ?`, []any{userID, ts}},
 		{&res.Runs, `DELETE FROM runs WHERE user_id = ? AND started_at < ?`, []any{userID, ts}},
+		{&res.Highlights, `DELETE FROM highlight_picks WHERE user_id = ? AND day < ?`, []any{userID, day}},
 		{&res.Items, `DELETE FROM items WHERE user_id = ? AND created_at < ?`, []any{userID, ts}},
 		{&res.Digests, `DELETE FROM digests WHERE user_id = ? AND batch_date < ?
 			AND NOT EXISTS (SELECT 1 FROM items WHERE items.user_id = digests.user_id AND items.digest_id = digests.id)`,

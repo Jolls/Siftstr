@@ -56,9 +56,10 @@ type Page struct {
 	Activity      []ActivityRow
 
 	// The /read page.
-	Day     string
-	Today   []briefing.Entry
-	Backlog []briefing.Entry
+	Day       string
+	Highlight *briefing.Highlight // the day's Karakeep highlight, shown first under Today
+	Today     []briefing.Entry
+	Backlog   []briefing.Entry
 }
 
 // ActivityRow is one outbox entry on /settings/activity.
@@ -91,6 +92,8 @@ type IngestForm struct {
 
 	KarakeepSummaryDelayMinutes int
 	KarakeepSummaryTimeoutHours int
+
+	KarakeepHighlights bool
 }
 
 // KeyRow is one API key on /settings/keys. The key itself is never part of

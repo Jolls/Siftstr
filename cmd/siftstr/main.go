@@ -28,6 +28,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/dest/karakeep"
 	"github.com/Jolls/Siftstr/internal/dest/metube"
 	destminiflux "github.com/Jolls/Siftstr/internal/dest/miniflux"
+	"github.com/Jolls/Siftstr/internal/highlights"
 	ingestkarakeep "github.com/Jolls/Siftstr/internal/ingest/karakeep"
 	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
 	"github.com/Jolls/Siftstr/internal/ingest/nostr"
@@ -194,6 +195,28 @@ func serve() error {
 			}
 			if res.Items > 0 || res.Resolved > 0 || res.GaveUp > 0 {
 				log.Printf("karakeep: %d new items, %d summaries read, %d items shown without one", res.Items, res.Resolved, res.GaveUp)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	hl := &highlights.Syncer{DB: st.DB(), Conns: conns, New: highlights.ClientFactory, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		// For users who turned highlights on: walks Karakeep's highlights when
+		// Siftstr starts and then weekly, and picks the day's highlight once.
+		// Most runs only check that today already has one.
+		Name: "highlights", Interval: time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := hl.Run(ctx, userID)
+			if errors.Is(err, highlights.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if res.Refreshed {
+				log.Printf("highlights: %d new, %d removed", res.Added, res.Removed)
+			}
+			if res.Picked {
+				log.Printf("highlights: picked today's highlight")
 			}
 			return err
 		},

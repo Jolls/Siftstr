@@ -38,6 +38,12 @@
       </label>
     </div>
     <small>Only for sources that use Karakeep summaries, and for items you promote from other sources.</small>
+    <input type="hidden" name="highlights_form" value="1">
+    <label>
+      <input type="checkbox" name="karakeep_highlights" value="1"{{if .Ingest.KarakeepHighlights}} checked{{end}}>
+      Show one Karakeep highlight at the top of each day's briefing
+    </label>
+    <small>Needs a Karakeep connection. Siftstr reads your highlights when it starts and then weekly, and picks a different one each day until it has shown them all.</small>
     <button type="submit">Save</button>
   </form>
 </article>

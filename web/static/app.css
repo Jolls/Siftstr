@@ -15,6 +15,7 @@
 .item .controls [data-badge], .item .controls [data-notice] { order: -1; flex-basis: 100%; text-align: center; }
 .item .controls [data-badge] { flex-basis: auto; }
 .item .excerpt { color: var(--pico-muted-color); }
+.read-highlight blockquote { white-space: pre-line; }
 
 /* Swipe left deletes, except on a promoted card, where it archives the bookmark. */
 .item .label-archive, .item[data-promoted="true"] .label-delete, .item[data-state="deep"] .label-delete { display: none; }

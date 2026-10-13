@@ -43,6 +43,12 @@ A per-source `summary_source` setting (`agent` or `karakeep`) decides where a pr
 
 ---
 
+## Karakeep highlights in the briefing
+
+An opt-in per-user setting puts one of the user's Karakeep highlights at the top of each day's briefing and `/read`, with its note and a link to the bookmark. Karakeep has no count or random pick for highlights, so Siftstr walks the list when it starts and weekly, caches the IDs, and picks a different one each day until all have been shown. Design in ARCHITECTURE.md §8 and §10 ([#34](https://github.com/Jolls/Siftstr/issues/34)). Built; not yet checked against a real Karakeep.
+
+---
+
 ## Later
 
 - **MCP server or plugin** as an alternative to the scheduled-task API.
