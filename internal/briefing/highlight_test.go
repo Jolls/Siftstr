@@ -13,7 +13,7 @@ func TestMarkdownPutsTheHighlightFirstUnderToday(t *testing.T) {
 		Day: "2026-10-09",
 		Highlight: &Highlight{
 			Text: "A passage\nover two lines.", Note: "Why I marked it", Color: "yellow",
-			Title: "An [odd] page", URL: "https://example.com/a_(1)", Byline: "example.com",
+			Title: "An [odd] page", URL: "https://example.com/a_(1)", Byline: "example.com", KarakeepURL: "https://kk.example.com/dashboard/preview/b1",
 		},
 		Today: []Entry{{Title: "Entry", Source: "Blog", MediaType: "article"}},
 	}
@@ -35,7 +35,7 @@ final: false
 
 Note: Why I marked it
 
-From [An \[odd\] page](https://example.com/a_%281%29) · example.com
+From [An \[odd\] page](https://example.com/a_%281%29) · example.com · [Karakeep](https://kk.example.com/dashboard/preview/b1)
 
 ### Entry
 

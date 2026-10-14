@@ -40,6 +40,9 @@ func highlight(sb *strings.Builder, h *Highlight) {
 	if by := oneLine(h.Byline); by != "" && by != title {
 		fmt.Fprintf(sb, " · %s", by)
 	}
+	if h.KarakeepURL != "" {
+		fmt.Fprintf(sb, " · [Karakeep](%s)", linkURL(h.KarakeepURL))
+	}
 	sb.WriteString("\n")
 }
 

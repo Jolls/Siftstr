@@ -10,7 +10,7 @@
     <h3>Highlight</h3>
     <blockquote>{{.Text}}</blockquote>
     {{if .Note}}<p>Note: {{.Note}}</p>{{end}}
-    {{if or .Title .Byline}}<p>From {{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}</a>{{else if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}{{if and .Title .Byline}}, {{.Byline}}{{end}}</p>{{end}}
+    {{if or .Title .Byline}}<p>From {{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}</a>{{else if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}{{if and .Title .Byline}}, {{.Byline}}{{end}}{{if .KarakeepURL}} · <a href="{{.KarakeepURL}}" rel="noopener noreferrer">Karakeep</a>{{end}}</p>{{end}}
   </article>{{end}}
   {{range .Today}}{{template "readentry" .}}{{else}}<p>Nothing arrived today.</p>{{end}}
 </section>

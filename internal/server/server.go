@@ -303,6 +303,12 @@ func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter
 		}
 		p := s.page(sess, list, heading)
 		p.Heading, p.Empty = heading, empty
+		if list == "today" {
+			if p.Highlight, err = s.Briefing.Highlight(ctx, sess.User.ID, today); err != nil {
+				serverError(w)
+				return
+			}
+		}
 		if p.PhoneFlow, err = s.Triage.PhoneFlow(ctx, sess.User.ID); err != nil {
 			serverError(w)
 			return
