@@ -22,7 +22,7 @@ Don't break any of these without updating ARCHITECTURE.md and asking the user fi
 - **Never download media.** No yt-dlp. Downloads are delegated to a destination such as MeTube.
 - **Source services are the system of record.** Siftstr stores only workflow state (queue, summaries, decisions, outbox, settings), and that state is deleted after 6 months. The one exception is a source set to use Karakeep summaries (`summary_source = karakeep`): its bookmarks are created in Karakeep at ingest, and Karakeep holds them from then on.
 - **All upstream side effects go through the outbox** and must be idempotent and retry-safe.
-- **One Claude run per day.** The morning scheduled task is the only LLM step. Ingest, write-back, carryover, briefing/export, and cleanup are Go code on in-app timers.
+- **One Claude run per day.** The morning scheduled task is the only LLM step. Ingest, write-back, carryover, briefing/export, and cleanup are Go code on in-app timers; certain settings saves also start one background run of the affected timer job for that user.
 - **SQLite is the source of truth.** The markdown briefing file and `/read` are renderings of it; never parse markdown back in.
 - **No source-type special cases** in triage logic. Use the per-source settings and the item's media type.
 - **Actioned items stay visible** with a badge, and undo stays possible. Never remove them from the DOM.
@@ -48,7 +48,7 @@ internal/ui/            HTMX handlers and templates
 internal/triage/        item state machine, action log, undo
 internal/sync/          /sync/actions endpoint and reconciliation
 internal/briefing/      builds the daily briefing; renders /read and the markdown file
-internal/ingest/        shared placement and Karakeep-bookmark helpers; miniflux/, nostr/, karakeep/ (bookmarks as a source, and reading Karakeep's summary back)
+internal/ingest/        shared placement and Karakeep-bookmark helpers; miniflux/, nostr/, karakeep/ (bookmarks as a source, and reading Karakeep's summary back), oldsifting/ (old Karakeep bookmarks into the Backlog)
 internal/highlights/    the daily Karakeep highlight: ID cache, weekly refresh, one pick per day
 internal/dest/          miniflux/, karakeep/, metube/, youtube/  (Destination impls)
 internal/outbox/        queue and workers

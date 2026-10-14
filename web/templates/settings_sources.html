@@ -43,7 +43,16 @@
       <input type="checkbox" name="karakeep_highlights" value="1"{{if .Ingest.KarakeepHighlights}} checked{{end}}>
       Show one Karakeep highlight at the top of each day's briefing
     </label>
-    <small>Needs a Karakeep connection. Siftstr reads your highlights when it starts and then weekly, and picks a different one each day until it has shown them all.</small>
+    <small>Needs a Karakeep connection. Siftstr starts reading your highlights as soon as you turn this on, then refreshes them weekly, and picks a different one each day until it has shown them all.</small>
+    <div class="grid">
+      <label>Old Karakeep bookmarks to bring back each day (0 = off)
+        <input type="number" name="old_sifting_daily" min="0" max="50" value="{{.Ingest.OldSiftingDaily}}" required>
+      </label>
+      <label>Add none while the Backlog holds at least (items)
+        <input type="number" name="old_sifting_backlog_cap" min="0" max="500" value="{{.Ingest.OldSiftingBacklogCap}}" required>
+      </label>
+    </div>
+    <small>Needs a Karakeep connection. Once a day Siftstr brings your oldest unarchived Karakeep bookmarks that are older than the age limit above into the Backlog, oldest first, topping the Backlog up to this size.</small>
     <button type="submit">Save</button>
   </form>
 </article>
@@ -93,6 +102,6 @@
 </article>
 {{end}}
 {{else}}
-<p>No sources yet. Connect Miniflux under <a href="/settings/destinations">Destinations</a>; feeds are mirrored on the next ingest run (every 30 minutes).</p>
+<p>No sources yet. Connect Miniflux under <a href="/settings/destinations">Destinations</a>; Siftstr starts fetching your feeds as soon as a working connection is saved, and again every 30 minutes.</p>
 {{end}}
 {{end}}

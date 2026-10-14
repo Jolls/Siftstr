@@ -17,6 +17,7 @@ import (
 	"github.com/Jolls/Siftstr/internal/ingest/nostr"
 	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
+	"github.com/Jolls/Siftstr/internal/scheduler"
 	"github.com/Jolls/Siftstr/internal/sources"
 	"github.com/Jolls/Siftstr/internal/triage"
 	"github.com/Jolls/Siftstr/internal/ui"
@@ -31,7 +32,7 @@ var destinationKinds = []ui.Destination{
 	{Kind: "metube", Label: "MeTube", Help: "Where kept videos are sent to download.", SecretLabel: "Secret (optional)"},
 }
 
-var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked.", "retried": "Queued to send again.", "dismissed": "Dismissed.", "released": "Held actions released. They will be sent shortly."}
+var notices = map[string]string{"saved": "Saved.", "disconnected": "Disconnected.", "revoked": "Key revoked.", "retried": "Queued to send again.", "dismissed": "Dismissed.", "released": "Held actions released. They will be sent shortly.", "fetching": "Saved. Fetching in the background."}
 
 // connStatusText is the label and help shown for each check state.
 var connStatusText = map[string][2]string{
@@ -47,6 +48,66 @@ var connStatusText = map[string][2]string{
 var connViaText = map[string]string{
 	connections.ViaSave: "when saved", connections.ViaTest: "by Test connection",
 	connections.ViaIngest: "while fetching new items", connections.ViaOutbox: "while sending an update",
+}
+
+// jobConnection is the connection kind a triggered job needs; a job not
+// listed (outbox) needs none.
+var jobConnection = map[string]string{
+	scheduler.JobIngestMiniflux: "miniflux",
+	scheduler.JobIngestNostr:    "nostr",
+	scheduler.JobKarakeep:       "karakeep",
+	scheduler.JobHighlights:     "karakeep",
+}
+
+// destinationJobs are the jobs a working connection save triggers.
+var destinationJobs = map[string][]string{
+	"miniflux": {scheduler.JobIngestMiniflux},
+	"karakeep": {scheduler.JobKarakeep, scheduler.JobHighlights},
+}
+
+// kick starts one background run of each job for userID, leaving out a job
+// whose connection the user has not saved, and reports whether it started
+// any. Call it only after a successful write, with sess.User.ID.
+func (s *server) kick(ctx context.Context, userID string, jobs ...string) bool {
+	if s.Kick == nil || len(jobs) == 0 {
+		return false
+	}
+	var have []connections.Connection
+	for _, j := range jobs {
+		if _, ok := jobConnection[j]; ok {
+			list, err := s.Conns.List(ctx, userID)
+			if err != nil {
+				return false
+			}
+			have = list
+			break
+		}
+	}
+	var run []string
+	for _, j := range jobs {
+		if kind, ok := jobConnection[j]; ok && !slices.ContainsFunc(have, func(c connections.Connection) bool { return c.Kind == kind }) {
+			continue
+		}
+		run = append(run, j)
+	}
+	if len(run) == 0 {
+		return false
+	}
+	s.Kick(userID, run...)
+	return true
+}
+
+// savedNotice is the notice after a save: it mentions a fetch only when one was started.
+func savedNotice(kicked bool) string {
+	if kicked {
+		return "fetching"
+	}
+	return "saved"
+}
+
+// maxAgeRaised reports whether a new max age lets in older entries. 0 means no limit.
+func maxAgeRaised(old, cur int) bool {
+	return cur != old && (cur == 0 || (old != 0 && cur > old))
 }
 
 func (s *server) settingsPage(sess *session, req *http.Request, title string) ui.Page {
@@ -85,7 +146,8 @@ func (s *server) renderSources(w http.ResponseWriter, req *http.Request, sess *s
 	}
 	p.Ingest = ui.IngestForm{ExcerptLength: ing.ExcerptLength, MaxAgeDays: ing.MaxAgeDays,
 		KarakeepSummaryDelayMinutes: ing.KarakeepSummaryDelayMinutes, KarakeepSummaryTimeoutHours: ing.KarakeepSummaryTimeoutHours,
-		KarakeepHighlights: ing.KarakeepHighlights}
+		KarakeepHighlights: ing.KarakeepHighlights,
+		OldSiftingDaily:    ing.OldSiftingDaily, OldSiftingBacklogCap: ing.OldSiftingBacklogCap}
 	for _, x := range list {
 		p.Sources = append(p.Sources, ui.SourceRow{
 			ID: x.ID, Name: x.Name, Category: x.Category, Kind: x.Kind,
@@ -109,14 +171,23 @@ func (s *server) sourcesSave(w http.ResponseWriter, req *http.Request, sess *ses
 		s.renderSources(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
 		return
 	}
-	err := s.Sources.Update(req.Context(), sess.User.ID, req.PathValue("id"), in)
+	prev, err := s.Sources.Get(req.Context(), sess.User.ID, req.PathValue("id"))
+	if err == nil {
+		err = s.Sources.Update(req.Context(), sess.User.ID, req.PathValue("id"), in)
+	}
 	switch {
 	case errors.Is(err, sources.ErrNotFound):
 		http.NotFound(w, req) // another user's source looks the same as a missing one
 	case err != nil:
 		serverError(w)
 	default:
-		http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+		kicked := false
+		if !prev.Enabled && in.Enabled {
+			if job, ok := scheduler.IngestJobForSourceKind(prev.Kind); ok {
+				kicked = s.kick(req.Context(), sess.User.ID, job)
+			}
+		}
+		http.Redirect(w, req, "/settings/sources?notice="+savedNotice(kicked), http.StatusSeeOther)
 	}
 }
 
@@ -136,13 +207,15 @@ func (s *server) ingestSave(w http.ResponseWriter, req *http.Request, sess *sess
 		return
 	}
 	in.KarakeepSummaryDelayMinutes, in.KarakeepSummaryTimeoutHours = cur.KarakeepSummaryDelayMinutes, cur.KarakeepSummaryTimeoutHours
+	in.OldSiftingDaily, in.OldSiftingBacklogCap = cur.OldSiftingDaily, cur.OldSiftingBacklogCap
 	// An unchecked box is not sent, so the form carries a marker; without it
 	// the saved choice stays.
 	in.KarakeepHighlights = cur.KarakeepHighlights
 	if req.PostFormValue("highlights_form") != "" {
 		in.KarakeepHighlights = req.PostFormValue("karakeep_highlights") != ""
 	}
-	for name, dst := range map[string]*int{"karakeep_summary_delay_minutes": &in.KarakeepSummaryDelayMinutes, "karakeep_summary_timeout_hours": &in.KarakeepSummaryTimeoutHours} {
+	for name, dst := range map[string]*int{"karakeep_summary_delay_minutes": &in.KarakeepSummaryDelayMinutes, "karakeep_summary_timeout_hours": &in.KarakeepSummaryTimeoutHours,
+		"old_sifting_daily": &in.OldSiftingDaily, "old_sifting_backlog_cap": &in.OldSiftingBacklogCap} {
 		if v := strings.TrimSpace(req.PostFormValue(name)); v != "" {
 			n, err := strconv.Atoi(v)
 			if err != nil {
@@ -160,7 +233,15 @@ func (s *server) ingestSave(w http.ResponseWriter, req *http.Request, sess *sess
 		serverError(w)
 		return
 	}
-	http.Redirect(w, req, "/settings/sources?notice=saved", http.StatusSeeOther)
+	var jobs []string
+	if in.KarakeepHighlights && !cur.KarakeepHighlights {
+		jobs = append(jobs, scheduler.JobHighlights)
+	}
+	if maxAgeRaised(cur.MaxAgeDays, in.MaxAgeDays) {
+		jobs = append(jobs, scheduler.JobIngestMiniflux, scheduler.JobIngestNostr, scheduler.JobKarakeep)
+	}
+	kicked := s.kick(req.Context(), sess.User.ID, jobs...)
+	http.Redirect(w, req, "/settings/sources?notice="+savedNotice(kicked), http.StatusSeeOther)
 }
 
 func (s *server) destinationsForm(w http.ResponseWriter, req *http.Request, sess *session) {
@@ -228,10 +309,11 @@ func (s *server) renderDestinations(w http.ResponseWriter, req *http.Request, se
 }
 
 // checkConnection tests c with its saved secret and records the result. It
-// never puts the secret in a page or a log line.
-func (s *server) checkConnection(ctx context.Context, userID string, c connections.Connection, via string) {
+// never puts the secret in a page or a log line. It returns the recorded
+// status (the zero Status when no check ran).
+func (s *server) checkConnection(ctx context.Context, userID string, c connections.Connection, via string) connections.Status {
 	if s.CheckConnection == nil {
-		return
+		return connections.Status{}
 	}
 	secret, err := s.Conns.Secret(ctx, userID, c.ID)
 	if errors.Is(err, connections.ErrNoSecret) && c.Kind == writeback.MeTube {
@@ -240,7 +322,7 @@ func (s *server) checkConnection(ctx context.Context, userID string, c connectio
 	if err == nil {
 		err = s.CheckConnection(ctx, c.Kind, c.BaseURL, secret)
 	}
-	s.Conns.Observe(ctx, userID, c, via, time.Now(), err)
+	return s.Conns.Observe(ctx, userID, c, via, time.Now(), err)
 }
 
 // destinationTest re-checks a saved connection without changing it.
@@ -309,6 +391,17 @@ func (s *server) destinationSave(w http.ResponseWriter, req *http.Request, sess 
 		serverError(w)
 		return
 	}
+	prevOK := false
+	if found {
+		statuses, err := s.Conns.Statuses(req.Context(), sess.User.ID)
+		if err != nil {
+			serverError(w)
+			return
+		}
+		prevOK = statuses[cur.ID].State == connections.StateOK
+	}
+	newSecret := secret != "" && req.PostFormValue("clear_secret") == ""
+	changed := !found || baseURL != cur.BaseURL || newSecret || !prevOK
 	var saved connections.Connection
 	if found {
 		saved, err = s.Conns.Update(req.Context(), sess.User.ID, cur.ID, connections.UpdateInput{
@@ -319,8 +412,9 @@ func (s *server) destinationSave(w http.ResponseWriter, req *http.Request, sess 
 	}
 	switch {
 	case err == nil:
-		s.checkConnection(req.Context(), sess.User.ID, saved, connections.ViaSave)
-		http.Redirect(w, req, "/settings/destinations?notice=saved", http.StatusSeeOther)
+		st := s.checkConnection(req.Context(), sess.User.ID, saved, connections.ViaSave)
+		kicked := changed && st.State == connections.StateOK && s.kick(req.Context(), sess.User.ID, destinationJobs[kind]...)
+		http.Redirect(w, req, "/settings/destinations?notice="+savedNotice(kicked), http.StatusSeeOther)
 	case errors.Is(err, connections.ErrBaseURL):
 		s.renderDestinations(w, req, sess, http.StatusUnprocessableEntity, err.Error()+".")
 	default:
@@ -466,7 +560,11 @@ func (s *server) activityForm(w http.ResponseWriter, req *http.Request, sess *se
 }
 
 func (s *server) activityRetry(w http.ResponseWriter, req *http.Request, sess *session) {
-	s.activityChange(w, req, s.Outbox.Retry(req.Context(), sess.User.ID, req.PathValue("id")), "retried")
+	err := s.Outbox.Retry(req.Context(), sess.User.ID, req.PathValue("id"))
+	if err == nil {
+		s.kick(req.Context(), sess.User.ID, scheduler.JobOutbox)
+	}
+	s.activityChange(w, req, err, "retried")
 }
 
 func (s *server) activityDismiss(w http.ResponseWriter, req *http.Request, sess *session) {
@@ -478,6 +576,7 @@ func (s *server) activityReleaseNow(w http.ResponseWriter, req *http.Request, se
 		serverError(w)
 		return
 	}
+	s.kick(req.Context(), sess.User.ID, scheduler.JobOutbox)
 	http.Redirect(w, req, "/settings/activity?notice=released", http.StatusSeeOther)
 }
 
@@ -623,6 +722,9 @@ func (s *server) nostrSave(w http.ResponseWriter, req *http.Request, sess *sessi
 		return
 	}
 	cur, found, err := s.existing(req, sess.User.ID, "nostr")
+	prev := nostr.ParseConfig(cur.Config) // zero when nothing is saved yet
+	changed := len(cfg.Relays) > 0 && len(cfg.Npubs) > 0 &&
+		(!found || !slices.Equal(prev.Relays, cfg.Relays) || !slices.Equal(prev.Npubs, cfg.Npubs))
 	if err == nil && found {
 		_, err = s.Conns.Update(req.Context(), sess.User.ID, cur.ID, connections.UpdateInput{Config: cfg.JSON()})
 	} else if err == nil {
@@ -632,7 +734,8 @@ func (s *server) nostrSave(w http.ResponseWriter, req *http.Request, sess *sessi
 		serverError(w)
 		return
 	}
-	http.Redirect(w, req, "/settings/nostr?notice=saved", http.StatusSeeOther)
+	kicked := changed && s.kick(req.Context(), sess.User.ID, scheduler.JobIngestNostr)
+	http.Redirect(w, req, "/settings/nostr?notice="+savedNotice(kicked), http.StatusSeeOther)
 }
 
 func (s *server) nostrDelete(w http.ResponseWriter, req *http.Request, sess *session) {

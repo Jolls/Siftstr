@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -32,6 +33,7 @@ import (
 	ingestkarakeep "github.com/Jolls/Siftstr/internal/ingest/karakeep"
 	"github.com/Jolls/Siftstr/internal/ingest/miniflux"
 	"github.com/Jolls/Siftstr/internal/ingest/nostr"
+	"github.com/Jolls/Siftstr/internal/ingest/oldsifting"
 	"github.com/Jolls/Siftstr/internal/janitor"
 	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
@@ -152,137 +154,15 @@ func serve() error {
 		writeback.Karakeep: karakeep.Factory,
 		writeback.MeTube:   metube.Factory,
 	}
+	sched := scheduler.New(enabledUsers(st), nil)
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies, CheckConnection: dest.CheckFunc(factories),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies, CheckConnection: dest.CheckFunc(factories), Kick: kicker(sched),
 	})
 	if err != nil {
 		return err
 	}
 	srv := newHTTPServer(cfg.Listen, h)
-	sched := scheduler.New(enabledUsers(st), nil)
-	mf := &miniflux.Ingester{DB: st.DB(), Conns: conns, New: miniflux.ClientFactory, Now: time.Now}
-	if err := sched.Register(scheduler.Job{
-		Name: "ingest-miniflux", Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
-		Run: func(ctx context.Context, userID string) error {
-			res, err := mf.Run(ctx, userID)
-			if errors.Is(err, miniflux.ErrNoConnection) {
-				return nil // nothing configured yet
-			}
-			if err == nil && (res.Items > 0 || res.TooOld > 0) {
-				log.Printf("miniflux ingest: %d new items, %d skipped as too old", res.Items, res.TooOld)
-			}
-			return err
-		},
-	}); err != nil {
-		return err
-	}
-	nn := &nostr.Ingester{DB: st.DB(), Conns: conns, Fetch: nostr.RelayFetcher{}, Now: time.Now}
-	if err := sched.Register(scheduler.Job{
-		Name: "ingest-nostr", Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
-		Run: func(ctx context.Context, userID string) error {
-			res, err := nn.Run(ctx, userID)
-			if errors.Is(err, nostr.ErrNoConnection) {
-				return nil // nothing configured yet
-			}
-			if err == nil && (res.Items > 0 || res.TooOld > 0 || res.Invalid > 0) {
-				log.Printf("nostr ingest: %d new items, %d skipped as too old, %d invalid events dropped", res.Items, res.TooOld, res.Invalid)
-			}
-			return err
-		},
-	}); err != nil {
-		return err
-	}
-	kkSync := &ingestkarakeep.Syncer{DB: st.DB(), Conns: conns, New: ingestkarakeep.ClientFactory, Now: time.Now}
-	if err := sched.Register(scheduler.Job{
-		// Offers the bookmarks Karakeep collected for triage, then reads
-		// Karakeep's summary back for promoted items that use it.
-		Name: "karakeep", Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
-		Run: func(ctx context.Context, userID string) error {
-			res, err := kkSync.Run(ctx, userID)
-			if errors.Is(err, ingestkarakeep.ErrNoConnection) {
-				return nil // nothing configured yet
-			}
-			if res.Items > 0 || res.Resolved > 0 || res.GaveUp > 0 {
-				log.Printf("karakeep: %d new items, %d summaries read, %d items shown without one", res.Items, res.Resolved, res.GaveUp)
-			}
-			return err
-		},
-	}); err != nil {
-		return err
-	}
-	hl := &highlights.Syncer{DB: st.DB(), Conns: conns, New: highlights.ClientFactory, Now: time.Now}
-	if err := sched.Register(scheduler.Job{
-		// For users who turned highlights on: walks Karakeep's highlights when
-		// Siftstr starts and then weekly, and picks the day's highlight once.
-		// Most runs only check that today already has one.
-		Name: "highlights", Interval: time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
-		Run: func(ctx context.Context, userID string) error {
-			res, err := hl.Run(ctx, userID)
-			if errors.Is(err, highlights.ErrNoConnection) {
-				return nil // nothing configured yet
-			}
-			if res.Refreshed {
-				log.Printf("highlights: %d new, %d removed", res.Added, res.Removed)
-			}
-			if res.Picked {
-				log.Printf("highlights: picked today's highlight")
-			}
-			return err
-		},
-	}); err != nil {
-		return err
-	}
-	if err := sched.Register(scheduler.Job{
-		// Marks actions whose undo hold has ended as released and queues their
-		// upstream effects in the outbox.
-		Name: "release-actions", Interval: time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
-		Run: func(ctx context.Context, userID string) error {
-			_, err := tr.ReleaseDue(ctx, userID)
-			return err
-		},
-	}); err != nil {
-		return err
-	}
-	sender := &writeback.Sender{DB: st.DB(), Conns: conns, Factories: factories, Now: time.Now}
-	ob := &outbox.Runner{DB: st.DB(), Handle: sender.Handle, Now: time.Now}
-	if err := sched.Register(scheduler.Job{
-		Name: "outbox", Interval: 30 * time.Second, Scope: scheduler.PerUser, RunOnStart: true,
-		Run: func(ctx context.Context, userID string) error {
-			res, err := ob.Run(ctx, userID)
-			if res.Done > 0 || res.Failed > 0 || res.Retried > 0 {
-				log.Printf("outbox: %d sent, %d retrying, %d failed", res.Done, res.Retried, res.Failed)
-			}
-			return err
-		},
-	}); err != nil {
-		return err
-	}
-	jan := &janitor.Janitor{DB: st.DB(), BackupDir: filepath.Join(cfg.DataDir, "backups"), Now: time.Now}
-	if err := sched.Register(scheduler.Job{
-		// Deletes each user's workflow rows older than six months.
-		Name: "janitor", Interval: 24 * time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
-		Run: func(ctx context.Context, userID string) error {
-			res, err := jan.Prune(ctx, userID)
-			if err == nil && (res.Items+res.Digests+res.Actions+res.Outbox+res.Runs) > 0 {
-				log.Printf("janitor: deleted %d items, %d digests, %d actions, %d outbox entries, %d runs",
-					res.Items, res.Digests, res.Actions, res.Outbox, res.Runs)
-			}
-			return err
-		},
-	}); err != nil {
-		return err
-	}
-	if err := sched.Register(scheduler.Job{
-		// One consistent snapshot of the whole database per day; keeps the newest 7.
-		Name: "backup", Interval: 24 * time.Hour, Scope: scheduler.Instance, RunOnStart: true,
-		Run: func(ctx context.Context, _ string) error {
-			wrote, err := jan.Snapshot(ctx)
-			if wrote {
-				log.Printf("backup: wrote a database snapshot to %s", jan.BackupDir)
-			}
-			return err
-		},
-	}); err != nil {
+	if err := registerJobs(sched, st, conns, tr, factories, cfg.DataDir); err != nil {
 		return err
 	}
 	var bg sync.WaitGroup
@@ -497,4 +377,167 @@ func baseURLWarning(cfg config.Config) string {
 		return ""
 	}
 	return "SIFTSTR_BASE_URL is not https: cookies are not Secure; expose this instance only on a trusted network or behind a TLS proxy"
+}
+
+// registerJobs adds every timer job to sched. Job names come from the
+// scheduler constants, which TestEveryJobNameIsRegistered checks.
+func registerJobs(sched *scheduler.Scheduler, st *store.Store, conns *connections.Service, tr *triage.Service, factories map[string]dest.Factory, dataDir string) error {
+	mf := &miniflux.Ingester{DB: st.DB(), Conns: conns, New: miniflux.ClientFactory, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		Name: scheduler.JobIngestMiniflux, Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := mf.Run(ctx, userID)
+			if errors.Is(err, miniflux.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if err == nil && (res.Items > 0 || res.TooOld > 0) {
+				log.Printf("miniflux ingest: %d new items, %d skipped as too old", res.Items, res.TooOld)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	nn := &nostr.Ingester{DB: st.DB(), Conns: conns, Fetch: nostr.RelayFetcher{}, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		Name: scheduler.JobIngestNostr, Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := nn.Run(ctx, userID)
+			if errors.Is(err, nostr.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if err == nil && (res.Items > 0 || res.TooOld > 0 || res.Invalid > 0) {
+				log.Printf("nostr ingest: %d new items, %d skipped as too old, %d invalid events dropped", res.Items, res.TooOld, res.Invalid)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	kkSync := &ingestkarakeep.Syncer{DB: st.DB(), Conns: conns, New: ingestkarakeep.ClientFactory, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		// Offers the bookmarks Karakeep collected for triage, then reads
+		// Karakeep's summary back for promoted items that use it.
+		Name: scheduler.JobKarakeep, Interval: 30 * time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := kkSync.Run(ctx, userID)
+			if errors.Is(err, ingestkarakeep.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if res.Items > 0 || res.Resolved > 0 || res.GaveUp > 0 {
+				log.Printf("karakeep: %d new items, %d summaries read, %d items shown without one", res.Items, res.Resolved, res.GaveUp)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	hl := &highlights.Syncer{DB: st.DB(), Conns: conns, New: highlights.ClientFactory, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		// For users who turned highlights on: walks Karakeep's highlights on the
+		// first run after a start (or after turning it on) and then weekly, and
+		// picks the day's highlight once. Most runs only check that today
+		// already has one.
+		Name: scheduler.JobHighlights, Interval: time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := hl.Run(ctx, userID)
+			if errors.Is(err, highlights.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if res.Refreshed {
+				log.Printf("highlights: %d new, %d removed", res.Added, res.Removed)
+			}
+			if res.Picked {
+				log.Printf("highlights: picked today's highlight")
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	osy := &oldsifting.Syncer{DB: st.DB(), Conns: conns, New: ingestkarakeep.ClientFactory, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		// For users with a Karakeep connection: walks the unarchived bookmarks
+		// older than the age limit a few pages per run, and once a day brings
+		// the oldest into the Backlog.
+		Name: scheduler.JobOldSifting, Interval: time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := osy.Run(ctx, userID)
+			if errors.Is(err, oldsifting.ErrNoConnection) {
+				return nil // nothing configured yet
+			}
+			if res.Cached > 0 || res.Pulled > 0 || res.Restarted {
+				log.Printf("old sifting: %d bookmarks cached, %d brought into the Backlog, walk restarted: %t", res.Cached, res.Pulled, res.Restarted)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	if err := sched.Register(scheduler.Job{
+		// Marks actions whose undo hold has ended as released and queues their
+		// upstream effects in the outbox.
+		Name: scheduler.JobReleaseActions, Interval: time.Minute, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			_, err := tr.ReleaseDue(ctx, userID)
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	sender := &writeback.Sender{DB: st.DB(), Conns: conns, Factories: factories, Now: time.Now}
+	ob := &outbox.Runner{DB: st.DB(), Handle: sender.Handle, Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		Name: scheduler.JobOutbox, Interval: 30 * time.Second, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := ob.Run(ctx, userID)
+			if res.Done > 0 || res.Failed > 0 || res.Retried > 0 {
+				log.Printf("outbox: %d sent, %d retrying, %d failed", res.Done, res.Retried, res.Failed)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	jan := &janitor.Janitor{DB: st.DB(), BackupDir: filepath.Join(dataDir, "backups"), Now: time.Now}
+	if err := sched.Register(scheduler.Job{
+		// Deletes each user's workflow rows older than six months.
+		Name: scheduler.JobJanitor, Interval: 24 * time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			res, err := jan.Prune(ctx, userID)
+			if err == nil && (res.Items+res.Digests+res.Actions+res.Outbox+res.Runs) > 0 {
+				log.Printf("janitor: deleted %d items, %d digests, %d actions, %d outbox entries, %d runs",
+					res.Items, res.Digests, res.Actions, res.Outbox, res.Runs)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	if err := sched.Register(scheduler.Job{
+		// One consistent snapshot of the whole database per day; keeps the newest 7.
+		Name: scheduler.JobBackup, Interval: 24 * time.Hour, Scope: scheduler.Instance, RunOnStart: true,
+		Run: func(ctx context.Context, _ string) error {
+			wrote, err := jan.Snapshot(ctx)
+			if wrote {
+				log.Printf("backup: wrote a database snapshot to %s", jan.BackupDir)
+			}
+			return err
+		},
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// kicker adapts sched.Trigger to server.Deps.Kick. A failed trigger is logged,
+// never returned: the save it follows has already succeeded.
+func kicker(sched *scheduler.Scheduler) func(userID string, jobs ...string) {
+	return func(userID string, jobs ...string) {
+		for _, j := range jobs {
+			if err := sched.Trigger(j, userID); err != nil {
+				slog.Error("scheduler: trigger failed", "job", j, "user", userID, "err", err)
+			}
+		}
+	}
 }
