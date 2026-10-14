@@ -47,6 +47,10 @@ A per-source `summary_source` setting (`agent` or `karakeep`) decides where a pr
 
 An opt-in per-user setting puts one of the user's Karakeep highlights at the top of each day's briefing and `/read`, with its note and a link to the bookmark. Karakeep has no count or random pick for highlights, so Siftstr walks the list when it starts and weekly, caches the IDs, and picks a different one each day until all have been shown. Design in ARCHITECTURE.md §8 and §10 ([#34](https://github.com/Jolls/Siftstr/issues/34)). Built; not yet checked against a real Karakeep.
 
+## Past briefings in the app
+
+`/briefings` lists the days the user has a briefing for, newest first, and each day can be viewed in the browser or downloaded as the stored markdown file. The days come from SQLite and the text is the file as written, never parsed ([#50](https://github.com/Jolls/Siftstr/issues/50)).
+
 ## Old Karakeep bookmarks (Old Sifting)
 
 The Karakeep ingestor stops at the age cutoff, so older unarchived bookmarks were never triaged. A per-user setting (default 5 a day, 0 = off) brings the oldest of them into the Backlog each day, up to a Backlog size limit (default 20). Siftstr caches their IDs a few pages per run instead of reading the whole library. Design in ARCHITECTURE.md §6 and §8 ([#46](https://github.com/Jolls/Siftstr/issues/46)). Built; not yet checked against a real Karakeep.
@@ -64,5 +68,4 @@ The Karakeep ingestor stops at the age cutoff, so older unarchived bookmarks wer
 - **Transcription** for podcasts and videos, so deep summaries can use the actual content.
 - **More destinations** for kept items (e.g. other downloaders or podcast apps) through the `Destination` interface.
 - **YouTube**: adding kept videos to a user-owned playlist (Watch Later is closed to the API; needs OAuth).
-- **Viewing past briefings in the app.** The markdown log covers this for now.
 - **Reversing a write-back** when undo happens after the hold has ended (e.g. delete the Karakeep bookmark).

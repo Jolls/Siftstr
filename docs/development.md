@@ -21,7 +21,7 @@ The seed tool is not in the released image, so run it on the host (needs Go) aga
 go run ./cmd/seed load -data ./.local/dev-data -user admin -file cmd/seed/example.json
 ```
 
-Loading the same file again changes nothing. The items come with summaries and are dated today, so they show on Today straight away; no run is needed.
+Loading the same file again changes nothing. Each earlier day in the file also gets a finished run and a closed briefing file, so **Briefings** has days to list. The items come with summaries and are dated today, so they show on Today straight away; no run is needed.
 
 **Stop the container while you seed** (`docker compose -f compose.dev.yaml stop`, then `start` again). SQLite's write-ahead log does not work across the Docker Desktop bind mount on Windows and macOS, so a seed written from the host while the container is running is invisible to the app: every list stays empty.
 
@@ -52,6 +52,7 @@ Send one summary per `items[].id` from the work package. Only promoted items and
 - **Today and Backlog:** triage items, and check that carried-over items land in the Backlog.
 - **Gestures and keys:** archive, promote and keep, by swipe, keyboard and buttons. Promoted items come back once with a deeper summary (run the morning recipe again and send a `deep` summary).
 - **Undo** within the hold. Afterwards the **Activity** page shows the held actions and lets you release them now.
+- **`/briefings`** lists the two earlier days the seed adds, each to view or download. Today has none until a morning run.
 - **`/read`** and the markdown briefing at `./.local/dev-data/briefings/<user>/YYYY-MM-DD.md`.
 - **Janitor and backup:** snapshots appear in `./.local/dev-data/backups`.
 

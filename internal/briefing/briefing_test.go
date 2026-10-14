@@ -2,6 +2,7 @@ package briefing
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -294,5 +295,50 @@ func TestEntriesNameTheBylineWhenThereIsOne(t *testing.T) {
 	}
 	if got["Title a"] != "Blog" || got["Title b"] != "Armstrong Economics" {
 		t.Fatalf("sources = %v", got)
+	}
+}
+
+func TestDaysListsOnlyTheUsersSummarizedDaysNewestFirst(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.exec(t, `INSERT INTO runs (id, user_id, started_at, summaries_at, day) VALUES
+		('r1','u1','n','n','2026-10-07'), ('r2','u1','n','n','2026-10-09'), ('r3','u1','n','n','2026-10-09'),
+		('r4','u1','n',NULL,'2026-10-10'), ('r5','u1','n','n',''), ('r6','u2','n','n','2026-10-08')`)
+	got, err := f.s.Days(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "2026-10-09,2026-10-07"; strings.Join(got, ",") != want {
+		t.Errorf("days = %v, want %s", got, want)
+	}
+	if other, _ := f.s.Days(ctx, "u2"); strings.Join(other, ",") != "2026-10-08" {
+		t.Errorf("bob's days = %v", other)
+	}
+}
+
+func TestFileReturnsTheStoredBytesOfTheUsersOwnDay(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	dir := filepath.Join(f.dir, "alice")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "2026-10-09.md"), []byte("kept <as> written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.s.File(ctx, "u1", "2026-10-09")
+	if err != nil || string(got) != "kept <as> written\n" {
+		t.Fatalf("file = %q, %v", got, err)
+	}
+	if _, err := f.s.File(ctx, "u1", "2026-10-08"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a day with no file: %v", err)
+	}
+	if _, err := f.s.File(ctx, "u2", "2026-10-09"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("bob must not get alice's file: %v", err)
+	}
+	for _, day := range []string{"../alice/2026-10-09", "2026-10-09/../..", "x", ""} {
+		if b, err := f.s.File(ctx, "u1", day); err == nil || len(b) != 0 {
+			t.Errorf("File(%q) = %q, %v: want an error", day, b, err)
+		}
 	}
 }

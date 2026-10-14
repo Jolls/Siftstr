@@ -240,6 +240,36 @@ func (s *Service) Write(ctx context.Context, userID, day string, final bool) err
 	return os.Rename(tmp.Name(), p)
 }
 
+// Days lists the days userID has a summarized run for, newest first.
+func (s *Service) Days(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT day FROM runs
+		WHERE user_id = ? AND summaries_at IS NOT NULL AND day != '' ORDER BY day DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var days []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		days = append(days, d)
+	}
+	return days, rows.Err()
+}
+
+// File returns the briefing file written for day, exactly as it is on disk. A
+// day with no file gives an error that satisfies errors.Is(err, os.ErrNotExist).
+// The text is only ever shown or downloaded, never parsed.
+func (s *Service) File(ctx context.Context, userID, day string) ([]byte, error) {
+	p, err := s.path(ctx, userID, day)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(p)
+}
+
 // Refresh rewrites the live file for day if one is already there, so a change
 // made after it was written (the day's highlight) shows up in it. It writes
 // nothing when there is no file yet: the first submission of the day makes it.

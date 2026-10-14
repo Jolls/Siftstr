@@ -18,6 +18,7 @@
         <li><a href="/today"{{if eq .Active "today"}} aria-current="page"{{end}}>Today</a></li>
         <li><a href="/backlog"{{if eq .Active "backlog"}} aria-current="page"{{end}}>Backlog</a></li>
         <li><a href="/read"{{if eq .Active "read"}} aria-current="page"{{end}}>Read</a></li>
+        <li><a href="/briefings"{{if eq .Active "briefings"}} aria-current="page"{{end}}>Briefings</a></li>
         <li><a href="/settings/sources"{{if eq .Active "settings"}} aria-current="page"{{end}}>Settings</a></li>
         <li>
           <form method="post" action="/logout" class="inline" data-logout>

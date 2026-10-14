@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
+	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/ids"
 )
 
@@ -144,6 +146,44 @@ func load(ctx context.Context, db *sql.DB, username string, f File, now time.Tim
 		}
 	}
 	return sources, items, tx.Commit()
+}
+
+// writeBriefings gives username a summarized run and a closed briefing file in
+// dir for every earlier day the seed's items are dated, so /briefings has days
+// to list. Today gets none, as with a real instance before its first morning
+// run. Writing the same file again changes nothing.
+func writeBriefings(ctx context.Context, db *sql.DB, dir, username string, f File, now time.Time) (int, error) {
+	uid, err := userID(ctx, db, username)
+	if err != nil {
+		return 0, err
+	}
+	local, err := localNow(ctx, db, uid, now)
+	if err != nil {
+		return 0, err
+	}
+	seen := map[int]bool{}
+	var back []int
+	for _, it := range f.Items {
+		if it.DaysAgo > 0 && !seen[it.DaysAgo] {
+			seen[it.DaysAgo] = true
+			back = append(back, it.DaysAgo)
+		}
+	}
+	sort.Ints(back)
+	svc := briefing.New(db, dir)
+	stamp := now.UTC().Format(time.RFC3339)
+	for _, d := range back {
+		day := local.AddDate(0, 0, -d).Format("2006-01-02")
+		if _, err := db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO runs (id, user_id, started_at, summaries_at, finished_at, day) VALUES (?, ?, ?, ?, ?, ?)`,
+			"run_seed_"+uid+"_"+day, uid, now.UTC().AddDate(0, 0, -d).Format(time.RFC3339), stamp, stamp, day); err != nil {
+			return 0, fmt.Errorf("seed run %s: %w", day, err)
+		}
+		if err := svc.Write(ctx, uid, day, true); err != nil {
+			return 0, fmt.Errorf("seed briefing %s: %w", day, err)
+		}
+	}
+	return len(back), nil
 }
 
 // export writes username's summarized items (light or deep) as a File. Source

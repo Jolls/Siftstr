@@ -15,7 +15,7 @@ import (
 // Page is the data every page template receives.
 type Page struct {
 	Title  string
-	Active string // nav entry to mark current: today, backlog, read, settings
+	Active string // nav entry to mark current: today, backlog, read, briefings, settings
 	User   *User  // nil when logged out
 	CSRF   string
 	Error  string
@@ -55,11 +55,21 @@ type Page struct {
 	Keep          []KeepChoice
 	Activity      []ActivityRow
 
+	// The /briefings pages.
+	BriefingDays []BriefingDay
+	BriefingText string // the stored file shown on /briefings/{day}
+
 	// The /read page.
 	Day       string
 	Highlight *briefing.Highlight // the day's Karakeep highlight, shown first under Today
 	Today     []briefing.Entry
 	Backlog   []briefing.Entry
+}
+
+// BriefingDay is one row of /briefings.
+type BriefingDay struct {
+	Day     string
+	HasFile bool // the markdown file is on disk
 }
 
 // ActivityRow is one outbox entry on /settings/activity.
@@ -201,6 +211,8 @@ var pageFiles = map[string][]string{
 	"login":                 {"login.html"},
 	"items":                 {"items.html"},
 	"read":                  {"read.html"},
+	"briefings":             {"briefings.html"},
+	"briefing":              {"briefing.html"},
 	"settings_sources":      {"settings_nav.html", "settings_sources.html"},
 	"settings_appearance":   {"settings_nav.html", "settings_appearance.html"},
 	"settings_destinations": {"settings_nav.html", "settings_destinations.html"},
