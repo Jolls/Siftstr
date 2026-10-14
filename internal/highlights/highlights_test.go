@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/connections"
 	kk "github.com/Jolls/Siftstr/internal/dest/karakeep"
 	"github.com/Jolls/Siftstr/internal/sources"
@@ -365,5 +368,43 @@ func TestUsersAreIsolated(t *testing.T) {
 	}
 	if f.count(`SELECT COUNT(*) FROM highlight_picks`) != 2 {
 		t.Error("each user has exactly one pick")
+	}
+}
+
+func TestPickAfterTheFileWasWrittenRewritesIt(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	bs := briefing.New(f.st.DB(), dir)
+	f.s.Briefing = bs
+	f.connect("u1")
+	f.enable("u1")
+	f.add("h1", "A marked passage")
+	ctx := context.Background()
+	file := filepath.Join(dir, "u1", "2026-10-11.md")
+
+	// No file yet (the morning run has not submitted): the pick must not make one.
+	f.run("u1")
+	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a pick with no file written created one: %v", err)
+	}
+
+	// The file was written first, without a highlight; a later pick rewrites it.
+	f.exec(`DELETE FROM highlight_picks`)
+	f.exec(`UPDATE highlight_cache SET shown_on = NULL`)
+	if err := bs.Write(ctx, "u1", "2026-10-11", false); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(file); strings.Contains(string(b), "### Highlight") {
+		t.Fatal("the file should start without a highlight")
+	}
+	if res := f.run("u1"); !res.Picked {
+		t.Fatalf("result = %+v", res)
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b); !strings.Contains(got, "### Highlight") || !strings.Contains(got, "> A marked passage") {
+		t.Errorf("file after the pick:\n%s", got)
 	}
 }

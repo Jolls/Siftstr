@@ -432,7 +432,8 @@ func registerJobs(sched *scheduler.Scheduler, st *store.Store, conns *connection
 	}); err != nil {
 		return err
 	}
-	hl := &highlights.Syncer{DB: st.DB(), Conns: conns, New: highlights.ClientFactory, Now: time.Now}
+	hl := &highlights.Syncer{DB: st.DB(), Conns: conns, New: highlights.ClientFactory, Now: time.Now,
+		Briefing: briefing.New(st.DB(), filepath.Join(dataDir, "briefings"))}
 	if err := sched.Register(scheduler.Job{
 		// For users who turned highlights on: walks Karakeep's highlights on the
 		// first run after a start (or after turning it on) and then weekly, and

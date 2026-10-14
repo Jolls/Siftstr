@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9] - 2026-10-14
+### Fixed
+- The day's Karakeep highlight now appears in the daily markdown briefing file even when it was picked after the file was written (for example when you turn highlights on mid-day). Before, the file only gained it at the next run submission ([#47](https://github.com/Jolls/Siftstr/issues/47))
+
 ## [0.2.8] - 2026-10-13
 ### Added
 - Old Sifting: each day Siftstr brings your oldest unarchived Karakeep bookmarks that are older than the age limit into the Backlog for triage, 5 a day by default (0 turns it off), and adds none while the Backlog holds 20 or more items. Both numbers are on Settings → Sources. Needs a Karakeep connection ([#46](https://github.com/Jolls/Siftstr/issues/46))
