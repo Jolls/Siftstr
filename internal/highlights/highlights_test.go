@@ -215,6 +215,13 @@ func TestPicksOneAndStoresItWithTheDay(t *testing.T) {
 	if f.count(`SELECT COUNT(*) FROM highlight_cache WHERE shown_on = '2026-10-11'`) != 1 {
 		t.Error("the picked highlight is not marked as shown")
 	}
+	var kk string
+	if err := f.st.DB().QueryRow(`SELECT karakeep_url FROM highlight_picks WHERE user_id = 'u1' AND day = '2026-10-11'`).Scan(&kk); err != nil {
+		t.Fatal(err)
+	}
+	if kk != "https://kk.example.com/dashboard/preview/b-h1" {
+		t.Errorf("karakeep link = %q", kk)
+	}
 }
 
 func TestOnePickPerDayAndNoNetworkOnceItExists(t *testing.T) {

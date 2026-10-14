@@ -44,12 +44,14 @@ type Entry struct {
 // Highlight is the Karakeep highlight picked for a day. It is shown before
 // the day's entries and is not an entry: nothing can be done with it.
 type Highlight struct {
-	Text   string
-	Note   string
-	Color  string
-	Title  string // the bookmark it was marked in; empty when that could not be read
-	URL    string
-	Byline string
+	Text  string
+	Note  string
+	Color string
+	Title string // the bookmark it was marked in; empty when that could not be read
+	URL   string // the original article, when the bookmark is a link
+	// KarakeepURL is the bookmark in Karakeep. Empty for a pick made before it was stored.
+	KarakeepURL string
+	Byline      string
 }
 
 // Briefing is one day's briefing for one user.
@@ -92,13 +94,20 @@ func (s *Service) Build(ctx context.Context, userID, day string, final bool) (Br
 	return b, nil
 }
 
+// Highlight returns the highlight stored for day, or nil, for pages that show
+// it without building the whole briefing. It reads only SQLite: the pick is
+// made by the highlights timer, never while a page loads.
+func (s *Service) Highlight(ctx context.Context, userID, day string) (*Highlight, error) {
+	return s.highlight(ctx, userID, day)
+}
+
 // highlight returns the highlight stored for day, or nil. It reads only
 // SQLite: the pick is made by the highlights timer, never while a page loads.
 func (s *Service) highlight(ctx context.Context, userID, day string) (*Highlight, error) {
 	var h Highlight
-	err := s.DB.QueryRowContext(ctx, `SELECT text, note, color, bookmark_title, bookmark_url, byline
+	err := s.DB.QueryRowContext(ctx, `SELECT text, note, color, bookmark_title, bookmark_url, karakeep_url, byline
 		FROM highlight_picks WHERE user_id = ? AND day = ?`, userID, day).
-		Scan(&h.Text, &h.Note, &h.Color, &h.Title, &h.URL, &h.Byline)
+		Scan(&h.Text, &h.Note, &h.Color, &h.Title, &h.URL, &h.KarakeepURL, &h.Byline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

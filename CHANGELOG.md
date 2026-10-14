@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.11] - 2026-10-14
+### Added
+- The day's Karakeep highlight now also shows at the top of the Today page, above the cards. It has no buttons and can't be swiped, the same as in the briefing and on `/read`.
+- The highlight links to its bookmark in Karakeep as well as to the original article, on the Today page, on `/read` and in the briefing file. A highlight picked before this version has no Karakeep link.
+
 ## [0.2.10] - 2026-10-14
 ### Added
 - Briefings: a new page in the main nav lists every past day's markdown briefing, newest first, with View (in the browser) and Download links. A day whose file is missing is listed without links ([#50](https://github.com/Jolls/Siftstr/issues/50))

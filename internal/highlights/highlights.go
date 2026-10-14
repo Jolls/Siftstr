@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -108,7 +109,7 @@ func (g *Syncer) Run(ctx context.Context, userID string) (Result, error) {
 			g.markRefreshed(userID)
 		}
 	}
-	perr := g.ensurePick(ctx, userID, api, &res)
+	perr := g.ensurePick(ctx, userID, conn.BaseURL, api, &res)
 	return res, errors.Join(rerr, perr)
 }
 
@@ -228,7 +229,7 @@ func cachedIDs(ctx context.Context, tx *sql.Tx, userID string) ([]string, error)
 // ensurePick chooses today's highlight from the cache, unless one is already
 // stored. A highlight Karakeep no longer has is dropped from the cache and
 // another is tried. A failure to read Karakeep leaves the day without one.
-func (g *Syncer) ensurePick(ctx context.Context, userID string, api API, res *Result) error {
+func (g *Syncer) ensurePick(ctx context.Context, userID, baseURL string, api API, res *Result) error {
 	day, err := sources.LocalDay(ctx, g.DB, userID, g.Now().UTC())
 	if err != nil {
 		return err
@@ -284,7 +285,7 @@ func (g *Syncer) ensurePick(ctx context.Context, userID string, api API, res *Re
 			}
 			byline = ingestkarakeep.Byline(b)
 		}
-		if err := g.store(ctx, userID, day, h, title, link, byline); err != nil {
+		if err := g.store(ctx, userID, day, h, title, link, byline, karakeepLink(baseURL, bookmarkID)); err != nil {
 			return err
 		}
 		res.Picked = true
@@ -328,18 +329,26 @@ func (g *Syncer) drop(ctx context.Context, userID, id string) error {
 	return err
 }
 
+// karakeepLink is the bookmark's page in the user's Karakeep.
+func karakeepLink(baseURL, bookmarkID string) string {
+	if bookmarkID == "" {
+		return ""
+	}
+	return strings.TrimRight(baseURL, "/") + "/dashboard/preview/" + url.PathEscape(bookmarkID)
+}
+
 // store records the day's pick and marks the highlight as shown, together.
-func (g *Syncer) store(ctx context.Context, userID, day string, h kk.Highlight, title, link, byline string) error {
+func (g *Syncer) store(ctx context.Context, userID, day string, h kk.Highlight, title, link, byline, karakeepURL string) error {
 	tx, err := g.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO highlight_picks
-		(user_id, day, highlight_id, text, note, color, bookmark_title, bookmark_url, byline, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(user_id, day, highlight_id, text, note, color, bookmark_title, bookmark_url, karakeep_url, byline, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (user_id, day) DO NOTHING`,
-		userID, day, h.ID, strings.TrimSpace(h.Text), strings.TrimSpace(h.Note), h.Color, title, link, byline,
+		userID, day, h.ID, strings.TrimSpace(h.Text), strings.TrimSpace(h.Note), h.Color, title, link, karakeepURL, byline,
 		g.Now().UTC().Format(time.RFC3339)); err != nil {
 		return fmt.Errorf("store highlight: %w", err)
 	}
