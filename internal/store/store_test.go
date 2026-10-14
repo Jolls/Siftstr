@@ -99,7 +99,7 @@ func TestOpenAppliesMigrationsOnceAndUsesWAL(t *testing.T) {
 	}
 	defer s.Close()
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 10 {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n != 11 {
 		t.Fatalf("migrations = %d, %v", n, err)
 	}
 }
@@ -108,7 +108,7 @@ func TestOpenAppliesMigrationsOnceAndUsesWAL(t *testing.T) {
 func TestUserOwnedTablesHaveUserID(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	for _, table := range []string{"sessions", "api_keys", "connections", "sources", "digests", "items", "actions", "outbox", "runs", "user_settings"} {
+	for _, table := range []string{"sessions", "api_keys", "connections", "sources", "digests", "items", "actions", "outbox", "runs", "user_settings", "old_bookmark_cache"} {
 		rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 		if err != nil {
 			t.Fatal(err)

@@ -4,6 +4,8 @@
 // keeps. Every route ends in the same call, act(), which updates the badge
 // at once and puts the action in the page queue (queue.js). Nothing here
 // makes a request or waits on the network, and a card is never removed.
+// In the bottom-up phone view an action also scrolls the next card into the
+// actioned card's place, so its buttons stay where the thumb is.
 (function (root, factory) {
   var api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -118,6 +120,8 @@
     // The user can turn the bottom-up layout off (data-flow="down").
     function reversed() { return !!(phone && phone.matches && list.dataset && list.dataset.flow !== "down"); }
 
+    function reduced() { return !!(win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+
     function cards() { return Array.prototype.slice.call(list.querySelectorAll("article.item")); }
 
     function render(el) {
@@ -152,7 +156,8 @@
       updateMore();
     }
 
-    // act records one action on a card and shows its effect immediately.
+    // act records one action on a card and shows its effect immediately. It
+    // returns true when the bottom-up view already moved focus on to the next card.
     function act(el, kind) {
       var q = win.siftQueue;
       var c = readCard(el);
@@ -165,10 +170,23 @@
       }
       var to = next(c.state, kind, c.canPromote);
       if (!to) return;
+      var prevBottom = el.getBoundingClientRect ? el.getBoundingClientRect().bottom : 0;
       var a = q.enqueue({ subject_type: c.type, subject_id: c.id, kind: kind });
       set(el, { state: to, undoID: a.action_id, prev: c.state, notice: "" });
       history.push(el);
       if (history.length > 50) history.shift();
+      return alignNext(el, prevBottom);
+    }
+
+    // alignNext, bottom-up only, scrolls so the next card to sift sits where
+    // the actioned card did, and moves focus to it so keys work after a tap.
+    function alignNext(el, prevBottom) {
+      if (!reversed() || !win.scrollBy) return false;
+      var n = nextCard(cards(), el);
+      if (!n) return false;
+      win.scrollBy({ top: scrollDelta(prevBottom, n.getBoundingClientRect().bottom), behavior: reduced() ? "auto" : "smooth" });
+      n.focus({ preventScroll: true });
+      return true;
     }
 
     // Buttons.
@@ -185,7 +203,7 @@
       if (!el) return;
       el.focus();
       // Reversed, the next card comes down and settles at the bottom, by the thumb.
-      if (el.scrollIntoView) el.scrollIntoView({ block: reversed() ? "end" : "nearest", behavior: "smooth" });
+      if (el.scrollIntoView) el.scrollIntoView({ block: reversed() ? "end" : "nearest", behavior: reduced() ? "auto" : "smooth" });
     }
     doc.addEventListener("keydown", function (e) {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -211,8 +229,7 @@
       }
       if (!cur) return;
       e.preventDefault();
-      act(cur, kind);
-      focusCard(all[all.indexOf(cur) + 1]); // on to the next card
+      if (!act(cur, kind)) focusCard(all[all.indexOf(cur) + 1]); // on to the next card, unless act() already did
     });
 
     // Touch: swipe left/right, tap to keep. Links and buttons keep their own taps.
@@ -256,5 +273,18 @@
     }
   }
 
-  return { badge: badge, next: next, swipe: swipe, undoTarget: undoTarget, step: step, reconcile: reconcile, init: init, KEYS: KEYS };
+  // scrollDelta is how far to scroll so the next card's bottom edge lands
+  // where the actioned card's bottom edge was.
+  function scrollDelta(prevBottom, nextBottom) { return nextBottom - prevBottom; }
+
+  // nextCard is the first card after el, in sifting order, still to sift.
+  function nextCard(all, el) {
+    for (var i = all.indexOf(el) + 1; i > 0 && i < all.length; i++) {
+      var st = all[i].dataset.state;
+      if (st === "light" || st === "deep") return all[i];
+    }
+    return null;
+  }
+
+  return { scrollDelta: scrollDelta, nextCard: nextCard, badge: badge, next: next, swipe: swipe, undoTarget: undoTarget, step: step, reconcile: reconcile, init: init, KEYS: KEYS };
 });

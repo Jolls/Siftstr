@@ -225,3 +225,18 @@ func TestSwitchingFromDigestToIndividualReleasesWaitingEntries(t *testing.T) {
 		t.Fatalf("another user's entry = %s", st)
 	}
 }
+
+func TestGetIsScopedToUser(t *testing.T) {
+	s := setup(t)
+	ctx := context.Background()
+	got, err := s.Get(ctx, "u1", "s1")
+	if err != nil || got.Kind != "miniflux_feed" || !got.Enabled {
+		t.Fatalf("Get = %+v, %v", got, err)
+	}
+	if _, err := s.Get(ctx, "u2", "s1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("other user's source: %v", err)
+	}
+	if _, err := s.Get(ctx, "u1", "nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing source: %v", err)
+	}
+}

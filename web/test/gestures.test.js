@@ -2,7 +2,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { badge, next, swipe, undoTarget, reconcile, KEYS } = require("../static/gestures.js");
+const { badge, next, swipe, undoTarget, reconcile, scrollDelta, nextCard, KEYS } = require("../static/gestures.js");
 
 test("archive and keep apply to light and deep cards", () => {
   for (const s of ["light", "deep"]) {
@@ -99,4 +99,17 @@ test("step: j and k mean next and previous; the arrows follow the screen", () =>
   // reversed (phone): the next card to sift is above, so Down goes back a card
   assert.equal(step("ArrowDown", true), -1);
   assert.equal(step("ArrowUp", true), 1);
+});
+
+test("scrollDelta is how far to scroll to move the next card to the old bottom edge", () => {
+  assert.equal(scrollDelta(800, 500), -300);
+  assert.equal(scrollDelta(500, 800), 300);
+});
+
+test("nextCard skips actioned cards and is null at the end", () => {
+  const c = (state) => ({ dataset: { state } });
+  const a = c("archived"), b = c("kept"), d = c("deep"), e = c("light");
+  assert.equal(nextCard([a, b, d, e], a), d);
+  assert.equal(nextCard([a, d, e], e), null);
+  assert.equal(nextCard([a, b], a), null);
 });

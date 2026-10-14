@@ -49,7 +49,8 @@ func (j *Janitor) now() time.Time {
 // Prune deletes userID's workflow rows older than the retention period, by
 // created_at (received_at for actions, started_at for runs, batch_date for
 // digests, which have no created_at). It never touches another user's rows or
-// the user's sources, connections and settings. Running it twice is harmless.
+// the user's sources, connections, settings and ID caches (highlight_cache,
+// old_bookmark_cache). Running it twice is harmless.
 func (j *Janitor) Prune(ctx context.Context, userID string) (Result, error) {
 	if userID == "" {
 		return Result{}, errors.New("janitor: user ID required")

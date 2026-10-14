@@ -14,8 +14,8 @@ Siftstr makes no LLM calls itself. The summaries come from a Claude scheduled ta
 
 ```mermaid
 flowchart TD
-    subgraph ingest ["Ingest (timers)"]
-        KR["Karakeep's own RSS import<br/>and bookmarks you save"] --> KQ["Every 30 minutes: list unarchived bookmarks.<br/>Skip if too old, already in Siftstr,<br/>or tagged sifted"]
+    subgraph ingest ["Ingest (timers, and after a settings save)"]
+        KR["Karakeep's own RSS import<br/>and bookmarks you save"] --> KQ["Every 30 minutes, and after a save that needs it:<br/>list unarchived bookmarks.<br/>Skip if too old, already in Siftstr,<br/>or tagged sifted"]
         MF[Miniflux entries] --> Q{"Per-source setting:<br/>summary_source"}
         NO[Nostr events] --> Q
     end
@@ -47,7 +47,8 @@ flowchart TD
 - **Triage is on the title and excerpt**, for every feed. Digests are the exception: they have no single title to judge, so a digest card starts as Claude's summary.
 - **Promote brings the card back with a summary.** On `agent` feeds (the default) Claude writes it at the next morning run and it overwrites the bookmark's summary in Karakeep about 30 minutes after the bookmark is created. On `karakeep` feeds (dashed) Karakeep's own summary is shown, with no Claude run.
 - **`agent` feeds** stay out of Karakeep until you promote or keep. Digests must use this path, and so should Nostr, which has no page for Karakeep to crawl.
-- **Bookmarks Karakeep collects itself** are polled every 30 minutes, so Karakeep's own RSS import can feed the same triage. They already have Karakeep's summary, so promote shows it with no Claude run. The `sifted` tag keeps Siftstr from offering back what it already sent.
+- **Older bookmarks** that the age limit leaves out come back a few a day into the Backlog (Old Sifting), oldest first, while the Backlog has room.
+- **Bookmarks Karakeep collects itself** are polled every 30 minutes (and as soon as you save a working Karakeep connection), so Karakeep's own RSS import can feed the same triage. They already have Karakeep's summary, so promote shows it with no Claude run. The `sifted` tag keeps Siftstr from offering back what it already sent.
 - **`karakeep` feeds** are saved to Karakeep at ingest, so use it only on feeds you are happy to have Karakeep crawl.
 - **Claude** writes digest summaries and the summary for promoted items on `agent` feeds. It does nothing else.
 
@@ -162,7 +163,7 @@ Put the CA certificate in `./certs` as a `.crt` or `.pem` file.
 ## Set up
 
 1. Log in, then open **Settings, Destinations** and add your Miniflux connection (and Karakeep and MeTube if you use them), skipping any that instance config already filled in.
-2. Open **Settings, Sources**. Your Miniflux feeds appear after the first ingest (it runs every 30 minutes, and once at start-up). Set granularity, max depth and carryover per source.
+2. Open **Settings, Sources**. Your Miniflux feeds appear after the first ingest, which starts as soon as a working Miniflux connection is saved (and runs every 30 minutes, and once at start-up). Set granularity, max depth and carryover per source.
 3. For Nostr, add relays and followed npubs under **Settings, Nostr**.
 4. Create the Claude scheduled task: [docs/scheduled-task.md](docs/scheduled-task.md).
 
