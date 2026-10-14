@@ -4,9 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.8] - 2026-10-14
+## [0.2.9] - 2026-10-14
 ### Fixed
 - The day's Karakeep highlight now appears in the daily markdown briefing file even when it was picked after the file was written (for example when you turn highlights on mid-day). Before, the file only gained it at the next run submission ([#47](https://github.com/Jolls/Siftstr/issues/47))
+
+## [0.2.8] - 2026-10-13
+### Added
+- Old Sifting: each day Siftstr brings your oldest unarchived Karakeep bookmarks that are older than the age limit into the Backlog for triage, 5 a day by default (0 turns it off), and adds none while the Backlog holds 20 or more items. Both numbers are on Settings → Sources. Needs a Karakeep connection ([#46](https://github.com/Jolls/Siftstr/issues/46))
+- Saving a setting that changes what Siftstr fetches starts that fetch in the background at once instead of on the next timer: turning on Karakeep highlights, enabling a source, raising the max age (or setting it to 0), saving a working Miniflux or Karakeep connection, and changing Nostr relays or npubs. The page then says "Saved. Fetching in the background." Repeated saves start at most one fetch per 30 seconds per job ([#44](https://github.com/Jolls/Siftstr/issues/44))
+### Changed
+- In the bottom-up phone view, deleting, promoting or keeping a card (by swipe, tap, key or button) scrolls so the next card sits where that card was, and its buttons stay in the same spot. The scroll is instant when the device asks for reduced motion ([#45](https://github.com/Jolls/Siftstr/issues/45))
+- Retry and Release held actions now on Settings → Activity send the updates at once instead of on the next outbox run ([#44](https://github.com/Jolls/Siftstr/issues/44))
 
 ## [0.2.7] - 2026-10-12
 ### Added

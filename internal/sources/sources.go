@@ -87,6 +87,19 @@ func (s *Service) List(ctx context.Context, userID string) ([]Source, error) {
 	return out, rows.Err()
 }
 
+// Get returns one of userID's sources. A missing source or another user's is ErrNotFound.
+func (s *Service) Get(ctx context.Context, userID, id string) (Source, error) {
+	var x Source
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, kind, name, category, granularity, max_depth, carryover, COALESCE(prompt_override, ''), enabled, summary_source
+		 FROM sources WHERE id = ? AND user_id = ?`, id, userID).
+		Scan(&x.ID, &x.Kind, &x.Name, &x.Category, &x.Granularity, &x.MaxDepth, &x.Carryover, &x.PromptOverride, &x.Enabled, &x.SummarySource)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Source{}, ErrNotFound
+	}
+	return x, err
+}
+
 // Update replaces the settings of one of userID's sources.
 func (s *Service) Update(ctx context.Context, userID, id string, in Settings) error {
 	in.PromptOverride = strings.TrimSpace(in.PromptOverride)
@@ -162,6 +175,14 @@ const (
 	// SettingHighlights is the user_settings key that turns on the daily
 	// Karakeep highlight in the briefing ("1" or "0"; off by default).
 	SettingHighlights = "karakeep_highlights"
+
+	// Old Sifting (ARCHITECTURE.md sections 6 and 8): how many old Karakeep
+	// bookmarks are brought into the Backlog each day (0 = off), and the
+	// Backlog size at which it adds none.
+	DefaultOldSiftingDaily      = 5
+	DefaultOldSiftingBacklogCap = 20
+	SettingOldSiftingDaily      = "old_sifting_daily"
+	SettingOldSiftingBacklogCap = "old_sifting_backlog_cap"
 )
 
 // IngestSettings are the user-level knobs that apply to every source.
@@ -173,6 +194,9 @@ type IngestSettings struct {
 	KarakeepSummaryTimeoutHours int // give up on Karakeep's summary after this long
 
 	KarakeepHighlights bool // show one Karakeep highlight at the top of each day's briefing
+
+	OldSiftingDaily      int // old Karakeep bookmarks brought into the Backlog per day; 0 = off
+	OldSiftingBacklogCap int // add none while the Backlog holds at least this many items
 }
 
 // Validate bounds both values.
@@ -186,6 +210,10 @@ func (s IngestSettings) Validate() error {
 		return errors.New("summary delay must be between 0 and 1440 minutes")
 	case s.KarakeepSummaryTimeoutHours < 1 || s.KarakeepSummaryTimeoutHours > 168:
 		return errors.New("summary timeout must be between 1 and 168 hours")
+	case s.OldSiftingDaily < 0 || s.OldSiftingDaily > 50:
+		return errors.New("old bookmarks per day must be between 0 and 50")
+	case s.OldSiftingBacklogCap < 0 || s.OldSiftingBacklogCap > 500:
+		return errors.New("backlog limit must be between 0 and 500")
 	}
 	return nil
 }
@@ -193,10 +221,12 @@ func (s IngestSettings) Validate() error {
 // Ingest returns userID's ingest settings, filling defaults.
 func (s *Service) Ingest(ctx context.Context, userID string) (IngestSettings, error) {
 	out := IngestSettings{ExcerptLength: DefaultExcerptLength, MaxAgeDays: DefaultMaxAgeDays,
-		KarakeepSummaryDelayMinutes: DefaultSummaryDelayMinutes, KarakeepSummaryTimeoutHours: DefaultSummaryTimeoutHours}
+		KarakeepSummaryDelayMinutes: DefaultSummaryDelayMinutes, KarakeepSummaryTimeoutHours: DefaultSummaryTimeoutHours,
+		OldSiftingDaily: DefaultOldSiftingDaily, OldSiftingBacklogCap: DefaultOldSiftingBacklogCap}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT key, value FROM user_settings WHERE user_id = ?
-		 AND key IN ('excerpt_length', 'max_age_days', ?, ?, ?)`, userID, SettingSummaryDelayMinutes, SettingSummaryTimeoutHours, SettingHighlights)
+		 AND key IN ('excerpt_length', 'max_age_days', ?, ?, ?, ?, ?)`, userID, SettingSummaryDelayMinutes, SettingSummaryTimeoutHours, SettingHighlights,
+		SettingOldSiftingDaily, SettingOldSiftingBacklogCap)
 	if err != nil {
 		return out, err
 	}
@@ -221,6 +251,10 @@ func (s *Service) Ingest(ctx context.Context, userID string) (IngestSettings, er
 			out.KarakeepSummaryTimeoutHours = n
 		case SettingHighlights:
 			out.KarakeepHighlights = n == 1
+		case SettingOldSiftingDaily:
+			out.OldSiftingDaily = n
+		case SettingOldSiftingBacklogCap:
+			out.OldSiftingBacklogCap = n
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -238,6 +272,12 @@ func (s *Service) Ingest(ctx context.Context, userID string) (IngestSettings, er
 	}
 	if out.KarakeepSummaryTimeoutHours < 1 {
 		out.KarakeepSummaryTimeoutHours = DefaultSummaryTimeoutHours
+	}
+	if out.OldSiftingDaily < 0 {
+		out.OldSiftingDaily = DefaultOldSiftingDaily
+	}
+	if out.OldSiftingBacklogCap < 0 {
+		out.OldSiftingBacklogCap = DefaultOldSiftingBacklogCap
 	}
 	return out, nil
 }
@@ -259,7 +299,8 @@ func (s *Service) SetIngest(ctx context.Context, userID string, in IngestSetting
 	for k, v := range map[string]int{
 		"excerpt_length": in.ExcerptLength, "max_age_days": in.MaxAgeDays,
 		SettingSummaryDelayMinutes: in.KarakeepSummaryDelayMinutes, SettingSummaryTimeoutHours: in.KarakeepSummaryTimeoutHours,
-		SettingHighlights: highlights,
+		SettingHighlights:      highlights,
+		SettingOldSiftingDaily: in.OldSiftingDaily, SettingOldSiftingBacklogCap: in.OldSiftingBacklogCap,
 	} {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)

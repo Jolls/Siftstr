@@ -93,7 +93,9 @@ type IngestForm struct {
 	KarakeepSummaryDelayMinutes int
 	KarakeepSummaryTimeoutHours int
 
-	KarakeepHighlights bool
+	KarakeepHighlights   bool
+	OldSiftingDaily      int
+	OldSiftingBacklogCap int
 }
 
 // KeyRow is one API key on /settings/keys. The key itself is never part of

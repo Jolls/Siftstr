@@ -190,7 +190,7 @@ func (g *Syncer) ingest(ctx context.Context, userID string, conn connections.Con
 		return err
 	}
 	defer tx.Rollback()
-	known, err := knownItems(ctx, tx, userID)
+	known, err := LoadKnown(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
@@ -226,12 +226,12 @@ func (g *Syncer) ingest(ctx context.Context, userID string, conn connections.Con
 			}
 		}
 		switch {
-		case b.Type != "link" || b.URL == "", b.HasTag(TagSifted), known.has(b):
+		case b.Type != "link" || b.URL == "", b.HasTag(TagSifted), known.Has(b):
 			res.Skipped++
 			continue
 		}
 		if sourceID == "" {
-			if sourceID, err = upsertSource(ctx, tx, userID); err != nil {
+			if sourceID, err = UpsertSource(ctx, tx, userID); err != nil {
 				return err
 			}
 		}
@@ -239,8 +239,8 @@ func (g *Syncer) ingest(ctx context.Context, userID string, conn connections.Con
 		if err != nil {
 			return err
 		}
-		title := firstNonEmpty(b.Title, b.PageTitle, b.URL)
-		excerpt := miniflux.Excerpt(firstNonEmpty(b.Description, b.Note), cfg.ExcerptLength)
+		title := Title(b)
+		excerpt := Excerpt(b, cfg.ExcerptLength)
 		r, err := insert.ExecContext(ctx, id, userID, sourceID, b.ID, miniflux.MediaType(miniflux.Entry{URL: b.URL}), b.URL,
 			title, excerpt, b.CreatedAt.UTC().Format(time.RFC3339), day, b.ID, nullIfEmpty(Byline(b)), stamp, stamp)
 		if err != nil {
@@ -248,7 +248,7 @@ func (g *Syncer) ingest(ctx context.Context, userID string, conn connections.Con
 		}
 		if n, _ := r.RowsAffected(); n > 0 {
 			res.Items++
-			known.add(b)
+			known.Add(b)
 		}
 	}
 	if complete {
@@ -298,7 +298,9 @@ func (g *Syncer) markWalked(ctx context.Context, x execer, userID string, cutoff
 	return err
 }
 
-func upsertSource(ctx context.Context, tx *sql.Tx, userID string) (string, error) {
+// UpsertSource returns the ID of the user's one Karakeep source row, creating it
+// if needed.
+func UpsertSource(ctx context.Context, tx *sql.Tx, userID string) (string, error) {
 	id, err := ids.New("src_")
 	if err != nil {
 		return "", err
@@ -328,6 +330,15 @@ func Byline(b kk.Bookmark) string {
 	return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
 }
 
+// Title is the name a bookmark's card shows.
+func Title(b kk.Bookmark) string { return firstNonEmpty(b.Title, b.PageTitle, b.URL) }
+
+// Excerpt is the text a bookmark's card shows under its title: the bookmark's
+// description, else its note, cut to n characters.
+func Excerpt(b kk.Bookmark, n int) string {
+	return miniflux.Excerpt(firstNonEmpty(b.Description, b.Note), n)
+}
+
 func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil
@@ -344,23 +355,26 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
-// known is what the user's items already cover: bookmark IDs, and normalized
+// Known is what the user's items already cover: bookmark IDs, and normalized
 // URLs (which also covers the short window in which a bookmark Siftstr just
 // made for a keep exists but is not tagged yet).
-type known struct {
+type Known struct {
 	ids  map[string]bool
 	urls map[string]bool
 }
 
-func (k known) has(b kk.Bookmark) bool { return k.ids[b.ID] || k.urls[NormalizeURL(b.URL)] }
+// Has reports whether b is already in Siftstr, by bookmark ID or normalized URL.
+func (k Known) Has(b kk.Bookmark) bool { return k.ids[b.ID] || k.urls[NormalizeURL(b.URL)] }
 
-func (k known) add(b kk.Bookmark) {
+// Add records b as known, so a later bookmark with the same ID or URL is skipped.
+func (k Known) Add(b kk.Bookmark) {
 	k.ids[b.ID] = true
 	k.urls[NormalizeURL(b.URL)] = true
 }
 
-func knownItems(ctx context.Context, tx *sql.Tx, userID string) (known, error) {
-	k := known{ids: map[string]bool{}, urls: map[string]bool{}}
+// LoadKnown reads what userID's items already cover.
+func LoadKnown(ctx context.Context, tx *sql.Tx, userID string) (Known, error) {
+	k := Known{ids: map[string]bool{}, urls: map[string]bool{}}
 	rows, err := tx.QueryContext(ctx,
 		`SELECT i.url, COALESCE(i.karakeep_id, ''), CASE WHEN s.kind = 'karakeep' THEN i.external_id ELSE '' END
 		 FROM items i JOIN sources s ON s.user_id = i.user_id AND s.id = i.source_id WHERE i.user_id = ?`, userID)
@@ -386,7 +400,7 @@ func knownItems(ctx context.Context, tx *sql.Tx, userID string) (known, error) {
 // knownState is what the user's items already hold, read before listing so the
 // walk can tell when a page has nothing in it to do.
 type knownState struct {
-	known   known
+	known   Known
 	unnamed map[string]bool // bookmark IDs of Karakeep-source items that have no byline yet
 }
 
@@ -395,7 +409,7 @@ func (k knownState) needsWork(b kk.Bookmark) bool {
 	if b.Type != "link" || b.URL == "" || b.HasTag(TagSifted) {
 		return k.unnamed[b.ID] && Byline(b) != ""
 	}
-	return !k.known.has(b) || (k.unnamed[b.ID] && Byline(b) != "")
+	return !k.known.Has(b) || (k.unnamed[b.ID] && Byline(b) != "")
 }
 
 func (g *Syncer) knownBefore(ctx context.Context, userID string) (knownState, error) {
@@ -404,7 +418,7 @@ func (g *Syncer) knownBefore(ctx context.Context, userID string) (knownState, er
 		return knownState{}, err
 	}
 	defer tx.Rollback()
-	k, err := knownItems(ctx, tx, userID)
+	k, err := LoadKnown(ctx, tx, userID)
 	if err != nil {
 		return knownState{}, err
 	}

@@ -75,6 +75,10 @@ type Deps struct {
 	// CheckConnection tests a saved connection with one cheap upstream call.
 	// Nil turns the test off (tests that do not set it make no upstream call).
 	CheckConnection func(ctx context.Context, kind, baseURL, secret string) error
+	// Kick starts one background run of each named scheduler job for userID
+	// (scheduler.Trigger). Nil turns triggers off (tests that do not set it
+	// start nothing). Handlers call it through s.kick, after a successful write.
+	Kick func(userID string, jobs ...string)
 }
 
 type server struct {
