@@ -61,6 +61,11 @@ type Syncer struct {
 	Now   func() time.Time
 	// Rand returns a number in [0, n). It defaults to math/rand/v2.
 	Rand func(n int) int
+	// Briefing, if set, is asked to rewrite the day's briefing file after a pick,
+	// since the file may have been written before the pick was made.
+	Briefing interface {
+		Refresh(ctx context.Context, userID, day string) error
+	}
 
 	mu        sync.Mutex
 	refreshed map[string]time.Time // when each user's cache was last walked, since this start
@@ -283,6 +288,11 @@ func (g *Syncer) ensurePick(ctx context.Context, userID string, api API, res *Re
 			return err
 		}
 		res.Picked = true
+		if g.Briefing != nil {
+			if err := g.Briefing.Refresh(ctx, userID, day); err != nil {
+				return fmt.Errorf("refresh briefing file: %w", err)
+			}
+		}
 		return nil
 	}
 	return nil

@@ -240,6 +240,22 @@ func (s *Service) Write(ctx context.Context, userID, day string, final bool) err
 	return os.Rename(tmp.Name(), p)
 }
 
+// Refresh rewrites the live file for day if one is already there, so a change
+// made after it was written (the day's highlight) shows up in it. It writes
+// nothing when there is no file yet: the first submission of the day makes it.
+func (s *Service) Refresh(ctx context.Context, userID, day string) error {
+	p, err := s.path(ctx, userID, day)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return s.Write(ctx, userID, day, false)
+}
+
 // Finalize rewrites the file of every earlier day that was summarized and
 // not yet closed, with final outcomes. today is the user's current local
 // date. Call it at the start of a morning run, after carryover has been

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-10-14
+### Fixed
+- The day's Karakeep highlight now appears in the daily markdown briefing file even when it was picked after the file was written (for example when you turn highlights on mid-day). Before, the file only gained it at the next run submission ([#47](https://github.com/Jolls/Siftstr/issues/47))
+
 ## [0.2.7] - 2026-10-12
 ### Added
 - Settings → Destinations shows whether each Miniflux, Karakeep and MeTube connection works: Siftstr tests it when you save it or press Test connection, and shows Connected or the reason it failed (can't reach it, certificate problem, key problem, unexpected response) with when it was last checked. Fetching new items and sending updates keep the result current, and a failed check is logged without the key ([#13](https://github.com/Jolls/Siftstr/issues/13))

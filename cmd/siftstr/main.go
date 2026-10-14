@@ -152,8 +152,9 @@ func serve() error {
 		writeback.Karakeep: karakeep.Factory,
 		writeback.MeTube:   metube.Factory,
 	}
+	brief := briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings"))
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies, CheckConnection: dest.CheckFunc(factories),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: brief, SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies, CheckConnection: dest.CheckFunc(factories),
 	})
 	if err != nil {
 		return err
@@ -210,7 +211,7 @@ func serve() error {
 	}); err != nil {
 		return err
 	}
-	hl := &highlights.Syncer{DB: st.DB(), Conns: conns, New: highlights.ClientFactory, Now: time.Now}
+	hl := &highlights.Syncer{DB: st.DB(), Conns: conns, New: highlights.ClientFactory, Now: time.Now, Briefing: brief}
 	if err := sched.Register(scheduler.Job{
 		// For users who turned highlights on: walks Karakeep's highlights when
 		// Siftstr starts and then weekly, and picks the day's highlight once.
