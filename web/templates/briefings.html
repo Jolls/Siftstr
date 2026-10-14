@@ -1,0 +1,19 @@
+{{define "content"}}
+<h1>Briefings</h1>
+<p>Each morning's briefing as a markdown file. View it here or download it.</p>
+{{if .BriefingDays}}
+<table class="briefings">
+  <thead><tr><th>Day</th><th></th></tr></thead>
+  <tbody>
+    {{range .BriefingDays}}
+    <tr data-briefing="{{.Day}}">
+      <td>{{.Day}}</td>
+      <td>{{if .HasFile}}<a href="/briefings/{{.Day}}">View</a> · <a href="/briefings/{{.Day}}/download">Download</a>{{else}}<small>No file for this day.</small>{{end}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No briefings yet. One appears after the first morning run.</p>
+{{end}}
+{{end}}

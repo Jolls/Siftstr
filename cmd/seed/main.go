@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -86,6 +87,10 @@ func run(args []string) error {
 		}
 		fmt.Printf("undo_hold_minutes set to %d for %s\n", *hold, *user)
 	}
-	fmt.Printf("added %d sources and %d items for %s\n", s, i, *user)
+	b, err := writeBriefings(ctx, st.DB(), filepath.Join(*data, "briefings"), *user, f, time.Now())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("added %d sources and %d items for %s; wrote %d earlier-day briefings\n", s, i, *user, b)
 	return nil
 }

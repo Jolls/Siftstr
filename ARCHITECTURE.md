@@ -351,6 +351,7 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 - Outcomes: deleted, archived (deleted after a promote), kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
 - Closing: `POST /api/v1/runs` runs carryover and then rewrites every earlier summarized day not yet closed with `final: true`. The last closed day is remembered in `user_settings` (`briefing_finalized_day`); the file is never read back.
 - `/read` renders the same Today and Backlog from the same query: headings and `<article>` only, with no buttons, forms or badges in the text flow.
+- `/briefings` lists the user's days (from `runs` with `summaries_at` set), newest first. `/briefings/{day}` shows that day's stored file as plain text and `/briefings/{day}/download` sends it as `text/markdown` with `Content-Disposition: attachment` and `nosniff`. The file is served as written, never parsed, and a past day is not rebuilt from SQLite, which would no longer match what was written (promoted items move to a later day and the Backlog changes). A day whose file is missing is listed without links. A malformed day, a missing file and another user's day all return 404. The list is not in `/read`, so reading mode and TTS never meet it.
 
 ---
 
@@ -474,6 +475,7 @@ An item's current outcome is derived from its latest effective action. The janit
 | `/today` | Today's batch |
 | `/backlog` | Untriaged items carried over from earlier days, and old Karakeep bookmarks brought back by Old Sifting |
 | `/read` | Today's summaries as one clean, linear page that works with Android reading mode and TTS |
+| `/briefings` | The user's past briefings, newest first, each to view in the browser (`/briefings/{day}`) or download (`/briefings/{day}/download`) |
 | `/settings/sources` | Per-source settings table |
 | `/settings/appearance` | List direction on a phone, theme (follow the device, light or dark) and accent color |
 | `/settings/prompts` | Global and per-source summarization instructions |

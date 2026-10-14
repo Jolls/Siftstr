@@ -113,3 +113,6 @@ form.inline button { margin: 0; width: auto; padding: 0.25rem 0.75rem; }
 /* Alert for upstream updates that stopped. */
 .alert { padding: .5rem 0; }
 .alert a { color: var(--pico-del-color); font-weight: 600; }
+
+/* A stored briefing shown as text: wrap long lines instead of scrolling. */
+pre.briefing-text { white-space: pre-wrap; overflow-wrap: anywhere; }

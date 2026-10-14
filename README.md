@@ -191,7 +191,7 @@ The janitor also deletes workflow data (items, actions, outbox entries, runs) ol
 
 ## Markdown briefings
 
-Each morning's run writes `/data/briefings/<username>/YYYY-MM-DD.md`, the same content as the `/read` page. To get it into Nextcloud or Obsidian, bind-mount a synced folder over `/data/briefings/<username>`.
+Each morning's run writes `/data/briefings/<username>/YYYY-MM-DD.md`, the same content as the `/read` page. To get it into Nextcloud or Obsidian, bind-mount a synced folder over `/data/briefings/<username>`. You can also open **Briefings** in the app to view or download any past day.
 
 ## Development
 

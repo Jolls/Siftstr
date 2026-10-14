@@ -1,0 +1,5 @@
+{{define "content"}}
+<h1>Briefing, {{.Day}}</h1>
+<p><a href="/briefings">All briefings</a> · <a href="/briefings/{{.Day}}/download">Download</a></p>
+<pre class="briefing-text">{{.BriefingText}}</pre>
+{{end}}

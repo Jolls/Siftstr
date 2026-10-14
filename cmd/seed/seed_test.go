@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/store"
 	"github.com/Jolls/Siftstr/internal/triage"
 )
@@ -121,5 +122,34 @@ func TestExportRoundTripsAndLeaksNothingElse(t *testing.T) {
 	dst.DB().QueryRow(`SELECT COUNT(*) FROM items WHERE batch_date < '2026-10-09'`).Scan(&older)
 	if older != 2 {
 		t.Fatalf("days_ago did not survive the round trip: %d older items", older)
+	}
+}
+
+func TestWriteBriefingsListsEarlierDaysOnlyAndIsRepeatable(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	now := time.Date(2026, 10, 9, 9, 0, 0, 0, time.UTC)
+	f := readExample(t)
+	if _, _, err := load(ctx, st.DB(), "alice", f, now); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for range 2 {
+		if n, err := writeBriefings(ctx, st.DB(), dir, "alice", f, now); err != nil || n != 2 {
+			t.Fatalf("writeBriefings = %d, %v; want 2 earlier days", n, err)
+		}
+	}
+	days, err := briefing.New(st.DB(), dir).Days(ctx, "u1")
+	if err != nil || len(days) != 2 || days[0] != "2026-10-08" || days[1] != "2026-10-07" {
+		t.Fatalf("days = %v, %v", days, err)
+	}
+	for _, day := range days {
+		b, err := os.ReadFile(filepath.Join(dir, "alice", day+".md"))
+		if err != nil || !strings.Contains(string(b), "final: true") {
+			t.Errorf("%s: %v %q", day, err, b)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "alice", "2026-10-09.md")); err == nil {
+		t.Error("today must have no file before the morning run")
 	}
 }
