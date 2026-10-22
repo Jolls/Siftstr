@@ -30,12 +30,14 @@ final: false
 
 ### Highlight
 
+Color: Yellow
+
 > A passage
 > over two lines.
 
 Note: Why I marked it
 
-From [An \[odd\] page](https://example.com/a_%281%29) · example.com · [Karakeep](https://kk.example.com/dashboard/preview/b1)
+From [An \[odd\] page](https://kk.example.com/dashboard/preview/b1) · example.com · [Original](https://example.com/a_%281%29)
 
 ### Entry
 
@@ -101,5 +103,67 @@ func TestRewritingADayKeepsItsHighlight(t *testing.T) {
 		if err != nil || !strings.Contains(string(got), "> kept text") {
 			t.Fatalf("final=%v: file = %v %q", final, err, got)
 		}
+	}
+}
+
+func TestMarkdownHighlightWithoutKarakeepURLLinksTheArticle(t *testing.T) {
+	b := Briefing{Day: "2026-10-09", Highlight: &Highlight{Text: "x", Title: "T", URL: "https://example.com/a", Byline: "example.com"}}
+	if md := b.Markdown(); !strings.Contains(md, "\nFrom [T](https://example.com/a) · example.com\n") || strings.Contains(md, "Original") {
+		t.Errorf("markdown = %s", md)
+	}
+}
+
+func TestMarkdownHighlightKarakeepPrimaryOriginalSecondary(t *testing.T) {
+	h := Highlight{Text: "x", Title: "T", Byline: "example.com", KarakeepURL: "https://kk.example.com/dashboard/preview/b1"}
+	withURL := h
+	withURL.URL = "https://example.com/a"
+	if md := (Briefing{Day: "2026-10-09", Highlight: &withURL}).Markdown(); !strings.Contains(md, "\nFrom [T](https://kk.example.com/dashboard/preview/b1) · example.com · [Original](https://example.com/a)\n") {
+		t.Errorf("markdown = %s", md)
+	}
+	if md := (Briefing{Day: "2026-10-09", Highlight: &h}).Markdown(); !strings.Contains(md, "\nFrom [T](https://kk.example.com/dashboard/preview/b1) · example.com\n") || strings.Contains(md, "Original") {
+		t.Errorf("no article URL: markdown = %s", md)
+	}
+}
+
+func TestCharMarkdownIgnoresColorToday(t *testing.T) {
+	plain := Briefing{Day: "2026-10-09", Highlight: &Highlight{Text: "x"}}.Markdown()
+	if got := (Briefing{Day: "2026-10-09", Highlight: &Highlight{Text: "x", Color: "purple"}}).Markdown(); got != plain {
+		t.Errorf("an unknown color changed the markdown:\n%s\nvs\n%s", got, plain)
+	}
+}
+
+func TestMarkdownShowsTheColorName(t *testing.T) {
+	md := (Briefing{Day: "2026-10-09", Highlight: &Highlight{Text: "text", Color: "green"}}).Markdown()
+	if !strings.Contains(md, "### Highlight\n\nColor: Green\n\n> text\n") {
+		t.Errorf("markdown = %s", md)
+	}
+	for _, c := range []string{"", "purple"} {
+		if md := (Briefing{Day: "2026-10-09", Highlight: &Highlight{Text: "text", Color: c}}).Markdown(); strings.Contains(md, "Color:") {
+			t.Errorf("color %q: markdown has a color line:\n%s", c, md)
+		}
+	}
+}
+
+func TestHighlightColorKeyAndLabel(t *testing.T) {
+	for key, label := range map[string]string{"yellow": "Yellow", "red": "Red", "green": "Green", "blue": "Blue"} {
+		h := Highlight{Color: key}
+		if h.ColorKey() != key || h.ColorLabel() != label {
+			t.Errorf("%s: key %q, label %q", key, h.ColorKey(), h.ColorLabel())
+		}
+	}
+	for _, c := range []string{"", "purple", "Yellow", `"><script>`} {
+		h := Highlight{Color: c}
+		if h.ColorKey() != "" || h.ColorLabel() != "" {
+			t.Errorf("%q: key %q, label %q; want both empty", c, h.ColorKey(), h.ColorLabel())
+		}
+	}
+}
+
+func TestBuildLoadsTheHighlightID(t *testing.T) {
+	f := newFixture(t)
+	f.exec(t, `INSERT INTO highlight_picks (user_id, day, highlight_id, text, created_at) VALUES ('u1', '2026-10-09', 'h1', 'x', 'c')`)
+	b, err := f.s.Build(context.Background(), "u1", "2026-10-09", false)
+	if err != nil || b.Highlight == nil || b.Highlight.ID != "h1" {
+		t.Errorf("highlight = %+v, %v", b.Highlight, err)
 	}
 }

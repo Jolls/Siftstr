@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -366,4 +367,29 @@ func (c *Client) GetHighlight(ctx context.Context, id string) (Highlight, error)
 		return h, ErrHighlightNotFound
 	}
 	return h, err
+}
+
+// HighlightColors is Karakeep's fixed highlight color set (zHighlightColorSchema), in the order offered.
+var HighlightColors = []string{"yellow", "red", "green", "blue"}
+
+// IsHighlightColor reports whether c is one of Karakeep's highlight colors.
+func IsHighlightColor(c string) bool { return slices.Contains(HighlightColors, c) }
+
+// HighlightColorLabel is the display name ("Yellow"), or "" for a color Karakeep does not list.
+func HighlightColorLabel(c string) string {
+	if !IsHighlightColor(c) {
+		return ""
+	}
+	return strings.ToUpper(c[:1]) + c[1:]
+}
+
+// UpdateHighlightColor sets the color of one highlight and nothing else: the
+// request carries no note, so Karakeep leaves it as it is. A highlight Karakeep
+// does not have returns ErrHighlightNotFound.
+func (c *Client) UpdateHighlightColor(ctx context.Context, id, color string) error {
+	status, err := dest.Call(ctx, c.hc, http.MethodPatch, c.base+"/api/v1/highlights/"+url.PathEscape(id), c.header(), map[string]any{"color": color}, nil)
+	if status == http.StatusNotFound {
+		return ErrHighlightNotFound
+	}
+	return err
 }

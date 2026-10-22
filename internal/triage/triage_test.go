@@ -701,3 +701,58 @@ func TestAccentSetting(t *testing.T) {
 		}
 	}
 }
+
+// kkConns gives u1 and u2 their own Karakeep connection (u1's base URL has a
+// trailing slash on purpose) for the tests that need one.
+func (f *fixture) kkConns(t *testing.T) {
+	t.Helper()
+	f.exec(t, `INSERT INTO connections (id, user_id, kind, base_url) VALUES
+		('c1','u1','karakeep','https://kk.example.com/'), ('c2','u2','karakeep','https://kk2.example.com')`)
+}
+
+func TestCardsLinkToOriginalWhenNoConnection(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "a", "u1", "src1", "light", "")
+	f.item(t, "b", "u1", "src1", "light", "")
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-09' WHERE user_id = 'u1'`)
+	f.exec(t, `UPDATE items SET karakeep_id = 'bm_a' WHERE id = 'a'`)
+	for id, c := range f.cardIDs(t, "u1", ListToday) {
+		if c.Kind == SubjectItem && c.URL != "https://example.com/x" {
+			t.Errorf("%s: URL = %q", id, c.URL)
+		}
+	}
+}
+
+func TestCardsCarryTheKarakeepBookmarkURL(t *testing.T) {
+	f := newFixture(t)
+	f.kkConns(t)
+	f.item(t, "a", "u1", "src1", "light", "")
+	f.item(t, "b", "u1", "src1", "light", "")
+	f.item(t, "old", "u1", "src1", "light", "")
+	f.item(t, "o", "u2", "src9", "light", "")
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-09' WHERE id IN ('a', 'b', 'o')`)
+	f.exec(t, `UPDATE items SET batch_date = '2026-10-08' WHERE id = 'old'`)
+	f.exec(t, `UPDATE items SET karakeep_id = 'bm_a' WHERE id = 'a'`)
+	f.exec(t, `UPDATE items SET karakeep_id = 'bm_old' WHERE id = 'old'`)
+	f.exec(t, `UPDATE items SET karakeep_id = 'bm_o' WHERE id = 'o'`)
+
+	today := f.cardIDs(t, "u1", ListToday)
+	if got := today["a"].KarakeepURL; got != "https://kk.example.com/dashboard/preview/bm_a" {
+		t.Errorf("a: KarakeepURL = %q", got)
+	}
+	if today["a"].URL != "https://example.com/x" {
+		t.Errorf("a: URL = %q, want the original", today["a"].URL)
+	}
+	if got := today["b"].KarakeepURL; got != "" {
+		t.Errorf("b has no bookmark but KarakeepURL = %q", got)
+	}
+	if got := today["dig1"].KarakeepURL; got != "" {
+		t.Errorf("a digest has no bookmark but KarakeepURL = %q", got)
+	}
+	if got := f.cardIDs(t, "u1", ListBacklog)["old"].KarakeepURL; got != "https://kk.example.com/dashboard/preview/bm_old" {
+		t.Errorf("backlog: KarakeepURL = %q", got)
+	}
+	if got := f.cardIDs(t, "u2", ListToday)["o"].KarakeepURL; got != "https://kk2.example.com/dashboard/preview/bm_o" {
+		t.Errorf("u2: KarakeepURL = %q, want u2's own base URL", got)
+	}
+}

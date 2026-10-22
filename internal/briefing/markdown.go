@@ -19,6 +19,9 @@ func (b Briefing) Markdown() string {
 // highlight writes the day's highlight as the first entry under Today.
 func highlight(sb *strings.Builder, h *Highlight) {
 	sb.WriteString("\n### Highlight\n\n")
+	if label := h.ColorLabel(); label != "" {
+		fmt.Fprintf(sb, "Color: %s\n\n", label)
+	}
 	for _, line := range strings.Split(strings.TrimSpace(h.Text), "\n") {
 		fmt.Fprintf(sb, "> %s\n", strings.TrimSpace(line))
 	}
@@ -29,9 +32,9 @@ func highlight(sb *strings.Builder, h *Highlight) {
 	if title == "" {
 		title = oneLine(h.Byline)
 	}
-	switch {
-	case title != "" && h.URL != "":
-		fmt.Fprintf(sb, "\nFrom [%s](%s)", escapeLink(title), linkURL(h.URL))
+	switch link := h.Link(); {
+	case title != "" && link != "":
+		fmt.Fprintf(sb, "\nFrom [%s](%s)", escapeLink(title), linkURL(link))
 	case title != "":
 		fmt.Fprintf(sb, "\nFrom %s", title)
 	default:
@@ -40,8 +43,8 @@ func highlight(sb *strings.Builder, h *Highlight) {
 	if by := oneLine(h.Byline); by != "" && by != title {
 		fmt.Fprintf(sb, " · %s", by)
 	}
-	if h.KarakeepURL != "" {
-		fmt.Fprintf(sb, " · [Karakeep](%s)", linkURL(h.KarakeepURL))
+	if h.HasOriginal() {
+		fmt.Fprintf(sb, " · [Original](%s)", linkURL(h.URL))
 	}
 	sb.WriteString("\n")
 }
@@ -58,8 +61,8 @@ func section(sb *strings.Builder, name string, h *Highlight, entries []Entry, em
 	for _, e := range entries {
 		sb.WriteString("\n### ")
 		title := oneLine(e.Title)
-		if e.URL != "" {
-			fmt.Fprintf(sb, "[%s](%s)", escapeLink(title), linkURL(e.URL))
+		if link := e.Link(); link != "" {
+			fmt.Fprintf(sb, "[%s](%s)", escapeLink(title), linkURL(link))
 		} else {
 			sb.WriteString(title)
 		}
@@ -69,6 +72,9 @@ func section(sb *strings.Builder, name string, h *Highlight, entries []Entry, em
 		}
 		if e.Outcome != "" {
 			meta += " · **" + e.Outcome + "**"
+		}
+		if e.HasOriginal() {
+			meta += " · [Original](" + linkURL(e.URL) + ")"
 		}
 		fmt.Fprintf(sb, "\n\n%s\n", meta)
 		if s := strings.TrimSpace(e.Summary); s != "" {

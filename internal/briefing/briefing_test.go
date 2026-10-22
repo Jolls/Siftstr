@@ -443,3 +443,91 @@ func TestDailyClosesDaysBeforeYesterdayOnly(t *testing.T) {
 		t.Errorf("marker = %q", last)
 	}
 }
+
+// kkConns gives u1 and u2 their own Karakeep connection (u1's base URL has a
+// trailing slash on purpose).
+func (f *fixture) kkConns(t *testing.T) {
+	t.Helper()
+	f.exec(t, `INSERT INTO connections (id, user_id, kind, base_url) VALUES
+		('c1','u1','karakeep','https://kk.example.com/'), ('c2','u2','karakeep','https://kk2.example.com')`)
+}
+
+func TestBuildWithoutKarakeepConnectionKeepsOriginalURL(t *testing.T) {
+	f := newFixture(t)
+	f.item(t, "a", "u1", "s1", "light", "2026-10-09", "sum a")
+	f.exec(t, `UPDATE items SET karakeep_id = 'bm_a' WHERE id = 'a'`)
+	b, err := f.s.Build(context.Background(), "u1", "2026-10-09", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Today) != 1 || b.Today[0].URL != "https://example.com/a" {
+		t.Fatalf("today = %+v", b.Today)
+	}
+	md := b.Markdown()
+	if !strings.Contains(md, "### [Title a](https://example.com/a)") || strings.Contains(md, "Original") {
+		t.Errorf("markdown = %s", md)
+	}
+}
+
+func TestBuildEntriesCarryTheKarakeepBookmarkURL(t *testing.T) {
+	f := newFixture(t)
+	f.kkConns(t)
+	f.item(t, "a", "u1", "s1", "light", "2026-10-09", "sum a")
+	f.item(t, "b", "u1", "s1", "light", "2026-10-09", "sum b")
+	f.item(t, "old", "u1", "s1", "light", "2026-10-08", "old")
+	f.item(t, "o", "u2", "s9", "light", "2026-10-09", "other")
+	f.exec(t, `INSERT INTO digests (id, user_id, source_id, batch_date, summary, state) VALUES ('dig1','u1','s3','2026-10-09','digest sum','light')`)
+	f.exec(t, `UPDATE items SET karakeep_id = 'bm_' || id WHERE id IN ('a', 'old', 'o')`)
+
+	b, err := f.s.Build(context.Background(), "u1", "2026-10-09", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Entry{}
+	for _, e := range append(append([]Entry{}, b.Today...), b.Backlog...) {
+		byID[e.ID] = e
+	}
+	if got := byID["a"].KarakeepURL; got != "https://kk.example.com/dashboard/preview/bm_a" {
+		t.Errorf("a: KarakeepURL = %q", got)
+	}
+	if byID["a"].URL != "https://example.com/a" {
+		t.Errorf("a: URL = %q, want the original", byID["a"].URL)
+	}
+	if got := byID["b"].KarakeepURL; got != "" {
+		t.Errorf("b has no bookmark but KarakeepURL = %q", got)
+	}
+	if got := byID["old"].KarakeepURL; got != "https://kk.example.com/dashboard/preview/bm_old" {
+		t.Errorf("backlog: KarakeepURL = %q", got)
+	}
+	if got := byID["dig1"].KarakeepURL; got != "" {
+		t.Errorf("a digest has no bookmark but KarakeepURL = %q", got)
+	}
+	b2, err := f.s.Build(context.Background(), "u2", "2026-10-09", false)
+	if err != nil || len(b2.Today) != 1 || b2.Today[0].KarakeepURL != "https://kk2.example.com/dashboard/preview/bm_o" {
+		t.Errorf("u2 = %+v, %v; want u2's own base URL", b2.Today, err)
+	}
+}
+
+func TestMarkdownEntryLinksKarakeepWithOriginalSecondary(t *testing.T) {
+	b := Briefing{Day: "2026-10-09", Today: []Entry{{
+		Title: "T", URL: "https://example.com/a", KarakeepURL: "https://kk.example.com/dashboard/preview/bm_a",
+		Source: "Blog", MediaType: "article", Outcome: "kept",
+	}}}
+	md := b.Markdown()
+	for _, want := range []string{
+		"### [T](https://kk.example.com/dashboard/preview/bm_a)\n",
+		"\nBlog · article · **kept** · [Original](https://example.com/a)\n",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+}
+
+func TestMarkdownEntryWithoutBookmarkHasNoOriginalLink(t *testing.T) {
+	b := Briefing{Day: "2026-10-09", Today: []Entry{{Title: "T", URL: "https://example.com/a", Source: "Blog", MediaType: "article"}}}
+	md := b.Markdown()
+	if !strings.Contains(md, "### [T](https://example.com/a)\n\nBlog · article\n") || strings.Contains(md, "Original") {
+		t.Errorf("markdown = %s", md)
+	}
+}

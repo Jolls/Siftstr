@@ -293,11 +293,27 @@ func TestBaseFollowsOSByDefault(t *testing.T) {
 	}
 }
 
-// The status badge colors (#31) are fixed hex values chosen for AA contrast; they live only in --badge-* variables.
+// The status badge colors (#31) and the highlight border colors (#55) are fixed hex values chosen for
+// contrast; they live only in --badge-* and --highlight-* variables.
 func TestAppCSSUsesOnlyPicoColors(t *testing.T) {
-	css := regexp.MustCompile(`--badge-[a-z]+-(bg|fg):\s*#[0-9a-fA-F]{6};`).ReplaceAllString(appCSS(t), "")
+	css := regexp.MustCompile(`--(badge-[a-z]+-(bg|fg)|highlight-[a-z]+):\s*#[0-9a-fA-F]{6};`).ReplaceAllString(appCSS(t), "")
 	if m := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(`).FindString(css); m != "" {
 		t.Errorf("app.css has a literal color %q", m)
+	}
+}
+
+func TestAppCSSHasABorderForEachHighlightColor(t *testing.T) {
+	css := appCSS(t)
+	for _, c := range []string{"yellow", "red", "green", "blue"} {
+		if !regexp.MustCompile(`\.highlight\[data-color="` + c + `"\][^{]*\{[^}]*--highlight-border:\s*var\(--highlight-` + c + `\)`).MatchString(css) {
+			t.Errorf("no border rule for %s", c)
+		}
+		if !regexp.MustCompile(`--highlight-` + c + `:\s*#[0-9a-fA-F]{6};`).MatchString(css) {
+			t.Errorf("--highlight-%s is not defined", c)
+		}
+	}
+	if !strings.Contains(css, "border-left") {
+		t.Error("no left border")
 	}
 }
 

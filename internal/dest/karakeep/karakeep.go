@@ -5,7 +5,8 @@
 // re-save without one unarchives the bookmark). Tags are then attached. Every
 // step sets a desired state, so running the whole sequence again changes
 // nothing. Other verbs work on a bookmark the item already has: update its
-// flag and tags, delete it, or overwrite its summary. A text note has no URL
+// flag and tags, delete it, or overwrite its summary. One verb works on a
+// highlight instead: it sets the highlight's color. A text note has no URL
 // to de-duplicate on, so the note carries a marker that is searched for
 // before creating.
 package karakeep
@@ -71,6 +72,16 @@ func (d *Destination) Send(ctx context.Context, item dest.Item) error {
 		}
 		d.id = item.BookmarkID
 		return d.c.AttachTags(ctx, item.BookmarkID, item.Tags)
+	case dest.VerbHighlightColor:
+		if item.HighlightID == "" || !IsHighlightColor(item.HighlightColor) {
+			return dest.Permanent(errors.New("no highlight or unknown color to send"))
+		}
+		err := d.c.UpdateHighlightColor(ctx, item.HighlightID, item.HighlightColor)
+		if errors.Is(err, ErrHighlightNotFound) {
+			// Deleted in Karakeep: retrying cannot help, so it stops and shows in Activity.
+			return dest.Permanent(err)
+		}
+		return err
 	case dest.VerbSave:
 		return d.save(ctx, item)
 	case dest.VerbCreate:

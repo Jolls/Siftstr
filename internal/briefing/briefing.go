@@ -5,6 +5,7 @@
 package briefing
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -13,6 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Jolls/Siftstr/internal/connections"
+	kk "github.com/Jolls/Siftstr/internal/dest/karakeep"
 )
 
 // Outcomes an entry can show. Empty means still waiting for a decision.
@@ -30,20 +34,31 @@ const settingFinalized = "briefing_finalized_day"
 
 // Entry is one item or digest in a briefing.
 type Entry struct {
-	ID        string
-	Digest    bool
-	Title     string
-	URL       string
-	Source    string
-	MediaType string
-	Excerpt   string // what the item was triaged on; shown when there is no summary
-	Summary   string // a digest's, or a promoted item's
-	Outcome   string
+	ID     string
+	Digest bool
+	Title  string
+	URL    string
+	// KarakeepURL is the item's Karakeep bookmark; empty when none.
+	KarakeepURL string
+	Source      string
+	MediaType   string
+	Excerpt     string // what the item was triaged on; shown when there is no summary
+	Summary     string // a digest's, or a promoted item's
+	Outcome     string
 }
+
+// Link is where the entry's title goes: its Karakeep bookmark when it has one,
+// else the original.
+func (e Entry) Link() string { return cmp.Or(e.KarakeepURL, e.URL) }
+
+// HasOriginal reports whether the original gets its own link beside a title
+// that goes to Karakeep.
+func (e Entry) HasOriginal() bool { return e.KarakeepURL != "" && e.URL != "" }
 
 // Highlight is the Karakeep highlight picked for a day. It is shown before
 // the day's entries and is not an entry: nothing can be done with it.
 type Highlight struct {
+	ID    string // the Karakeep highlight
 	Text  string
 	Note  string
 	Color string
@@ -85,10 +100,14 @@ func (s *Service) Build(ctx context.Context, userID, day string, final bool) (Br
 	if b.Highlight, err = s.highlight(ctx, userID, day); err != nil {
 		return b, err
 	}
-	if b.Today, err = s.entries(ctx, userID, `x.batch_date = ? AND x.state IN ('light', 'deep', 'archived', 'kept', 'pending_deep', 'expired')`, day, final); err != nil {
+	kkBase, err := connections.KarakeepBaseURL(ctx, s.DB, userID)
+	if err != nil {
 		return b, err
 	}
-	if b.Backlog, err = s.entries(ctx, userID, `x.batch_date < ? AND x.state IN ('light', 'deep', 'pending_deep')`, day, final); err != nil {
+	if b.Today, err = s.entries(ctx, userID, kkBase, `x.batch_date = ? AND x.state IN ('light', 'deep', 'archived', 'kept', 'pending_deep', 'expired')`, day, final); err != nil {
+		return b, err
+	}
+	if b.Backlog, err = s.entries(ctx, userID, kkBase, `x.batch_date < ? AND x.state IN ('light', 'deep', 'pending_deep')`, day, final); err != nil {
 		return b, err
 	}
 	return b, nil
@@ -105,9 +124,9 @@ func (s *Service) Highlight(ctx context.Context, userID, day string) (*Highlight
 // SQLite: the pick is made by the highlights timer, never while a page loads.
 func (s *Service) highlight(ctx context.Context, userID, day string) (*Highlight, error) {
 	var h Highlight
-	err := s.DB.QueryRowContext(ctx, `SELECT text, note, color, bookmark_title, bookmark_url, karakeep_url, byline
+	err := s.DB.QueryRowContext(ctx, `SELECT highlight_id, text, note, color, bookmark_title, bookmark_url, karakeep_url, byline
 		FROM highlight_picks WHERE user_id = ? AND day = ?`, userID, day).
-		Scan(&h.Text, &h.Note, &h.Color, &h.Title, &h.URL, &h.KarakeepURL, &h.Byline)
+		Scan(&h.ID, &h.Text, &h.Note, &h.Color, &h.Title, &h.URL, &h.KarakeepURL, &h.Byline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -138,10 +157,12 @@ func outcome(state string, promoted, final bool) string {
 }
 
 // entries lists items, then digests, matching cond (written against alias x).
-// Entries inside a digest are covered by the digest and not listed.
-func (s *Service) entries(ctx context.Context, userID, cond, day string, final bool) ([]Entry, error) {
+// Entries inside a digest are covered by the digest and not listed. kkBase is
+// the user's Karakeep base URL, or "" when there is no connection.
+func (s *Service) entries(ctx context.Context, userID, kkBase, cond, day string, final bool) ([]Entry, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT x.id, x.title, x.url, COALESCE(NULLIF(x.byline, ''), src.name), x.media_type, x.state,
-		x.excerpt, COALESCE(NULLIF(x.deep_summary, ''), x.light_summary, ''), x.promoted_at IS NOT NULL
+		x.excerpt, COALESCE(NULLIF(x.deep_summary, ''), x.light_summary, ''), x.promoted_at IS NOT NULL,
+		COALESCE(x.karakeep_id, '')
 		FROM items x JOIN sources src ON src.user_id = x.user_id AND src.id = x.source_id
 		WHERE x.user_id = ? AND x.digest_id IS NULL AND `+cond+`
 		ORDER BY COALESCE(x.published_at, x.created_at) DESC, x.id`, userID, day)
@@ -151,12 +172,13 @@ func (s *Service) entries(ctx context.Context, userID, cond, day string, final b
 	var out []Entry
 	for rows.Next() {
 		var e Entry
-		var state string
+		var state, kkID string
 		var promoted bool
-		if err := rows.Scan(&e.ID, &e.Title, &e.URL, &e.Source, &e.MediaType, &state, &e.Excerpt, &e.Summary, &promoted); err != nil {
+		if err := rows.Scan(&e.ID, &e.Title, &e.URL, &e.Source, &e.MediaType, &state, &e.Excerpt, &e.Summary, &promoted, &kkID); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		e.KarakeepURL = connections.BookmarkURL(kkBase, kkID)
 		e.Outcome = outcome(state, promoted, final)
 		out = append(out, e)
 	}
@@ -409,3 +431,22 @@ func (s *Service) finalizedDay(ctx context.Context, userID string) (string, erro
 	}
 	return last, nil
 }
+
+// Link is where the highlight's source goes: its Karakeep bookmark when it
+// has one, else the article.
+func (h Highlight) Link() string { return cmp.Or(h.KarakeepURL, h.URL) }
+
+// HasOriginal reports whether the article gets its own link beside a source
+// that goes to Karakeep.
+func (h Highlight) HasOriginal() bool { return h.KarakeepURL != "" && h.URL != "" }
+
+// ColorKey is the highlight's color when it is one of Karakeep's, else "". Safe for an attribute value.
+func (h Highlight) ColorKey() string {
+	if !kk.IsHighlightColor(h.Color) {
+		return ""
+	}
+	return h.Color
+}
+
+// ColorLabel is "Yellow" etc. for a known color, else "".
+func (h Highlight) ColorLabel() string { return kk.HighlightColorLabel(h.Color) }

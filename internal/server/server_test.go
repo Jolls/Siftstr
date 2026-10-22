@@ -11,10 +11,12 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/connections"
+	"github.com/Jolls/Siftstr/internal/highlights"
 	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
@@ -56,7 +58,7 @@ func setupDeps(t *testing.T, ready func(context.Context) error, secure bool, mod
 		t.Fatal(err)
 	}
 	briefDir := t.TempDir()
-	d := Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), briefDir), SecureCookies: secure}
+	d := Deps{Ready: ready, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: runs.New(st.DB()), Triage: triage.New(st.DB()), Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), briefDir), HighlightColors: &highlights.Colors{DB: st.DB(), Now: time.Now}, SecureCookies: secure}
 	if mod != nil {
 		mod(&d)
 	}

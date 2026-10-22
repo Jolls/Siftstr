@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -285,7 +284,7 @@ func (g *Syncer) ensurePick(ctx context.Context, userID, baseURL string, api API
 			}
 			byline = ingestkarakeep.Byline(b)
 		}
-		if err := g.store(ctx, userID, day, h, title, link, byline, karakeepLink(baseURL, bookmarkID)); err != nil {
+		if err := g.store(ctx, userID, day, h, title, link, byline, connections.BookmarkURL(baseURL, bookmarkID)); err != nil {
 			return err
 		}
 		res.Picked = true
@@ -327,14 +326,6 @@ func (g *Syncer) candidate(ctx context.Context, userID string) (id, bookmarkID s
 func (g *Syncer) drop(ctx context.Context, userID, id string) error {
 	_, err := g.DB.ExecContext(ctx, `DELETE FROM highlight_cache WHERE user_id = ? AND highlight_id = ?`, userID, id)
 	return err
-}
-
-// karakeepLink is the bookmark's page in the user's Karakeep.
-func karakeepLink(baseURL, bookmarkID string) string {
-	if bookmarkID == "" {
-		return ""
-	}
-	return strings.TrimRight(baseURL, "/") + "/dashboard/preview/" + url.PathEscape(bookmarkID)
 }
 
 // store records the day's pick and marks the highlight as shown, together.
