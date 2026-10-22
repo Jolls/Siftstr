@@ -77,6 +77,7 @@ func (j *Janitor) Prune(ctx context.Context, userID string) (Result, error) {
 		{&res.Outbox, `DELETE FROM outbox WHERE user_id = ? AND created_at < ?`, []any{userID, ts}},
 		{&res.Actions, `DELETE FROM actions WHERE user_id = ? AND received_at < ?`, []any{userID, ts}},
 		{&res.Runs, `DELETE FROM runs WHERE user_id = ? AND started_at < ?`, []any{userID, ts}},
+		{new(int64), `DELETE FROM briefing_days WHERE user_id = ? AND day < ?`, []any{userID, day}},
 		{&res.Highlights, `DELETE FROM highlight_picks WHERE user_id = ? AND day < ?`, []any{userID, day}},
 		{&res.Items, `DELETE FROM items WHERE user_id = ? AND created_at < ?`, []any{userID, ts}},
 		{&res.Digests, `DELETE FROM digests WHERE user_id = ? AND batch_date < ?

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jolls/Siftstr/internal/store"
 )
@@ -340,5 +341,105 @@ func TestFileReturnsTheStoredBytesOfTheUsersOwnDay(t *testing.T) {
 		if b, err := f.s.File(ctx, "u1", day); err == nil || len(b) != 0 {
 			t.Errorf("File(%q) = %q, %v: want an error", day, b, err)
 		}
+	}
+}
+
+func TestDaysIncludesDaysWithAFileAndNoRun(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.exec(t, `INSERT INTO runs (id, user_id, started_at, summaries_at, day) VALUES ('r1','u1','n','n','2026-10-07')`)
+	f.exec(t, `INSERT INTO briefing_days (user_id, day, written_at) VALUES ('u1','2026-10-09','n'), ('u1','2026-10-07','n'), ('u2','2026-10-08','n')`)
+	got, err := f.s.Days(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "2026-10-09,2026-10-07"; strings.Join(got, ",") != want {
+		t.Errorf("days = %v, want %s", got, want)
+	}
+}
+
+// With no Claude run at all, the timer step still writes today's file and
+// lists the day.
+func TestDailyWritesTodayWithoutARun(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.item(t, "a", "u1", "s1", "light", "2026-10-09", "")
+	f.item(t, "theirs", "u2", "s9", "light", "2026-10-09", "")
+	if err := f.s.Daily(ctx, "u1", "2026-10-09"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := f.s.File(ctx, "u1", "2026-10-09")
+	if err != nil || !strings.Contains(string(body), "Title a") || strings.Contains(string(body), "Title theirs") {
+		t.Fatalf("file = %q, %v", body, err)
+	}
+	if days, _ := f.s.Days(ctx, "u1"); strings.Join(days, ",") != "2026-10-09" {
+		t.Errorf("days = %v", days)
+	}
+	if days, _ := f.s.Days(ctx, "u2"); len(days) != 0 {
+		t.Errorf("bob's days = %v", days)
+	}
+}
+
+func TestDailyPicksUpNewItemsAndLeavesAnUnchangedFileAlone(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.item(t, "a", "u1", "s1", "light", "2026-10-09", "")
+	if err := f.s.Daily(ctx, "u1", "2026-10-09"); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(f.dir, "alice", "2026-10-09.md")
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Daily(ctx, "u1", "2026-10-09"); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(p); !fi.ModTime().Equal(old) {
+		t.Errorf("an unchanged file was rewritten")
+	}
+	f.item(t, "b", "u1", "s1", "light", "2026-10-09", "")
+	if err := f.s.Daily(ctx, "u1", "2026-10-09"); err != nil {
+		t.Fatal(err)
+	}
+	if body, _ := os.ReadFile(p); !strings.Contains(string(body), "Title b") {
+		t.Errorf("new item missing:\n%s", body)
+	}
+}
+
+func TestDailyWritesNothingForAnEmptyDay(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.s.Daily(ctx, "u1", "2026-10-09"); err != nil {
+		t.Fatal(err)
+	}
+	if days, _ := f.s.Days(ctx, "u1"); len(days) != 0 {
+		t.Errorf("days = %v", days)
+	}
+	if _, err := f.s.File(ctx, "u1", "2026-10-09"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("file: %v", err)
+	}
+}
+
+// Yesterday is left for the morning run, which closes it after carryover.
+// The timer closes a day only once it is two days old.
+func TestDailyClosesDaysBeforeYesterdayOnly(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.item(t, "a", "u1", "s1", "light", "2026-10-07", "")
+	f.item(t, "b", "u1", "s1", "light", "2026-10-08", "")
+	f.exec(t, `INSERT INTO briefing_days (user_id, day, written_at) VALUES ('u1','2026-10-07','n'), ('u1','2026-10-08','n')`)
+	if err := f.s.Daily(ctx, "u1", "2026-10-09"); err != nil {
+		t.Fatal(err)
+	}
+	old, err := f.s.File(ctx, "u1", "2026-10-07")
+	if err != nil || !strings.Contains(string(old), "final: true") {
+		t.Errorf("2026-10-07 not closed: %q, %v", old, err)
+	}
+	if _, err := f.s.File(ctx, "u1", "2026-10-08"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("yesterday was written by the timer: %v", err)
+	}
+	if last, _ := f.s.finalizedDay(ctx, "u1"); last != "2026-10-07" {
+		t.Errorf("marker = %q", last)
 	}
 }

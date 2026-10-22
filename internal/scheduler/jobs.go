@@ -14,13 +14,14 @@ const (
 	JobHighlights     = "highlights"
 	JobOldSifting     = "old-sifting"
 	JobReleaseActions = "release-actions"
+	JobBriefing       = "briefing"
 	JobOutbox         = "outbox"
 	JobJanitor        = "janitor"
 	JobBackup         = "backup"
 )
 
 // JobNames lists every job name above.
-var JobNames = []string{JobIngestMiniflux, JobIngestNostr, JobKarakeep, JobHighlights, JobOldSifting, JobReleaseActions, JobOutbox, JobJanitor, JobBackup}
+var JobNames = []string{JobIngestMiniflux, JobIngestNostr, JobKarakeep, JobHighlights, JobOldSifting, JobReleaseActions, JobBriefing, JobOutbox, JobJanitor, JobBackup}
 
 // MinTriggerGap is the least time between triggered starts of one job for one
 // user, counting timer runs. It protects upstreams (Nostr relays above all)

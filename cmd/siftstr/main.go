@@ -486,6 +486,21 @@ func registerJobs(sched *scheduler.Scheduler, st *store.Store, conns *connection
 	}); err != nil {
 		return err
 	}
+	bf := briefing.New(st.DB(), filepath.Join(dataDir, "briefings"))
+	if err := sched.Register(scheduler.Job{
+		// Writes each user's briefing for the day and closes earlier days, so a
+		// briefing exists whether or not the Claude run happened.
+		Name: scheduler.JobBriefing, Interval: time.Hour, Scope: scheduler.PerUser, RunOnStart: true,
+		Run: func(ctx context.Context, userID string) error {
+			today, err := sources.LocalDay(ctx, st.DB(), userID, time.Now())
+			if err != nil {
+				return err
+			}
+			return bf.Daily(ctx, userID, today)
+		},
+	}); err != nil {
+		return err
+	}
 	sender := &writeback.Sender{DB: st.DB(), Conns: conns, Factories: factories, Now: time.Now}
 	ob := &outbox.Runner{DB: st.DB(), Handle: sender.Handle, Now: time.Now}
 	if err := sched.Register(scheduler.Job{

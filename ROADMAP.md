@@ -49,7 +49,7 @@ An opt-in per-user setting puts one of the user's Karakeep highlights at the top
 
 ## Past briefings in the app
 
-`/briefings` lists the days the user has a briefing for, newest first, and each day can be viewed in the browser or downloaded as the stored markdown file. The days come from SQLite and the text is the file as written, never parsed ([#50](https://github.com/Jolls/Siftstr/issues/50)).
+`/briefings` lists the days the user has a briefing for, newest first, and each day can be viewed in the browser or downloaded as the stored markdown file. The days come from SQLite and the text is the file as written, never parsed. A timer writes each day's file, so it works without a Claude run ([#50](https://github.com/Jolls/Siftstr/issues/50)).
 
 ## Old Karakeep bookmarks (Old Sifting)
 
