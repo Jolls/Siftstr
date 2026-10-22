@@ -52,7 +52,7 @@ Send one summary per `items[].id` from the work package. Only promoted items and
 - **Today and Backlog:** triage items, and check that carried-over items land in the Backlog.
 - **Gestures and keys:** archive, promote and keep, by swipe, keyboard and buttons. Promoted items come back once with a deeper summary (run the morning recipe again and send a `deep` summary).
 - **Undo** within the hold. Afterwards the **Activity** page shows the held actions and lets you release them now.
-- **`/briefings`** lists the two earlier days the seed adds, each to view or download. Today has none until a morning run.
+- **`/briefings`** lists the two earlier days the seed adds, each to view or download. Today's appears within a minute of the first start, from the briefing timer.
 - **`/read`** and the markdown briefing at `./.local/dev-data/briefings/<user>/YYYY-MM-DD.md`.
 - **Janitor and backup:** snapshots appear in `./.local/dev-data/backups`.
 

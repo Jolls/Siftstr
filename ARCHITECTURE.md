@@ -92,7 +92,7 @@ In practice, v1 has **two ingestors: Miniflux and Nostr**. Everything RSS-shaped
 |---|---|
 | HTTP server | Go `net/http`: HTML/HTMX routes, JSON API, action sync endpoint, auth middleware |
 | Accounts | Users, password login, sessions, per-user API keys, per-user upstream connections (secrets encrypted at rest) |
-| Scheduler | In-app timers for ingestion, releasing held actions, the outbox, highlights, the janitor and backups. Per-user jobs run once per user. A settings save can also trigger one run of a per-user job for that user (section 8, *Runs started by a save*). |
+| Scheduler | In-app timers for ingestion, releasing held actions, the outbox, highlights, the daily briefing file, the janitor and backups. Per-user jobs run once per user. A settings save can also trigger one run of a per-user job for that user (section 8, *Runs started by a save*). |
 | Miniflux ingestor | Mirrors feeds and categories into `sources`; pulls unread entries on a timer into the database; dedupes by entry ID |
 | Karakeep ingestor | On the Karakeep job, lists the user's unarchived Karakeep bookmarks newest first, 20 to a page, and creates an item for each link that is not too old, not already in Siftstr, and not one Siftstr created itself (§6). Only runs for users with a Karakeep connection. |
 | Nostr ingestor | On the ingest timer, opens a short subscription to each of the user's relays for the followed npubs, reads until the relay signals end of stored events, and closes it. Drops events with a bad ID or signature or from an unfollowed key, skips replies, and dedupes by event ID. Items link to a public viewer (`njump.me`) because events have no URL of their own. |
@@ -294,6 +294,7 @@ type Destination interface {
 ### All day: Siftstr timers (no LLM)
 
 - **Ingest timers** (every 30 minutes, one per ingestor): keep adding new Miniflux entries and Nostr events to the database as `light`, ready to triage at once, on the user's local day they were ingested (digest entries as `pending_light`, summarized at the next morning run). A source set to use Karakeep summaries also gets its archived Karakeep bookmark queued in the outbox at this point. Saving certain settings also starts one run for that user at once (see *Runs started by a save* below); the morning Claude request never ingests.
+- **Briefing timer** (every hour, per user): writes the user's briefing file for their local day and closes earlier days (§8, *Markdown briefing file*), so a briefing exists on days with no Claude run, for example when every source uses Karakeep summaries. It rewrites the file only when its text changed and writes nothing for a day with no entries, Backlog or highlight.
 - **Release timer** (e.g. every minute): releases actions whose hold has ended and sends their write-backs. On Settings, Activity, Release held actions now releases them at once and, like Retry there, starts one outbox run for the user, so the write-backs do not wait for the outbox timer.
 - **Karakeep job** (every 30 minutes, per user, skipped for users with no Karakeep connection): first lists unarchived Karakeep bookmarks and offers new ones as `light` items (§6), then, for each `pending_deep` item from a `karakeep` source, reads the bookmark's summary and moves the item to `deep` when it appears, or when Karakeep reports failure or the timeout passes (§5). One job rather than two timers, because a 30-minute wait for a promoted card is acceptable (the summary is normally there already) and it keeps one pass over one connection. An item whose promote is still in its undo hold is skipped, so an undo is never refused because the summary happened to arrive.
 - **Highlights job** (hourly, per user; also once at startup, and at once when the user turns highlights on or saves a working Karakeep connection; does nothing unless the user turned on `karakeep_highlights` and has a Karakeep connection). Karakeep has no count or random pick for highlights and its IDs are random strings, so this job caches them and picks from the cache. It has two parts:
@@ -342,8 +343,8 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 
 ### Markdown briefing file
 
-- It is written once the morning summaries arrive.
-- It is rewritten with final outcomes (deleted / archived / promoted / kept / carried over) at the next morning run, before the new day's file starts. The finished file is the durable log of that day.
+- It is written by the briefing timer (hourly, so it keeps up with items ingested through the day) and again when the morning summaries arrive. Claude is not required: the entries come from SQLite, and a summary appears in the file when one exists. A file whose text did not change is left alone, so a sync client sees no churn.
+- It is rewritten with final outcomes (deleted / archived / promoted / kept / carried over) at the next morning run, before the new day's file starts. If no morning run does it, the briefing timer closes the day once it is two days old, so a day is never left open. The finished file is the durable log of that day.
 - It is generated from the same data and template as `/read`, so the file matches what the user saw.
 - It lives at `/data/briefings/<username>/YYYY-MM-DD.md` (the day is the user's local date), written atomically so a sync client never sees half a file. A failed write is logged and never fails the run or the summary submission.
 - Layout: YAML frontmatter (`date`, `today`, `backlog`, `final`), then `## Today` and `## Backlog`, one `###` entry per item or digest (linked title, source and media type, outcome, then the summary, or the excerpt as a quote when there is no summary yet). A digest always has a summary; a promoted item gets its summary at the next rewrite, not live (Q25). The summaries are Claude's or Karakeep's markdown, inserted as is.
@@ -351,7 +352,7 @@ The user then opens Siftstr and triages. If the connection drops mid-session, sw
 - Outcomes: deleted, archived (deleted after a promote), kept, promoted, expired, and at closing `carried over` for anything still waiting. Entries inside a digest are covered by the digest.
 - Closing: `POST /api/v1/runs` runs carryover and then rewrites every earlier summarized day not yet closed with `final: true`. The last closed day is remembered in `user_settings` (`briefing_finalized_day`); the file is never read back.
 - `/read` renders the same Today and Backlog from the same query: headings and `<article>` only, with no buttons, forms or badges in the text flow.
-- `/briefings` lists the user's days (from `runs` with `summaries_at` set), newest first. `/briefings/{day}` shows that day's stored file as plain text and `/briefings/{day}/download` sends it as `text/markdown` with `Content-Disposition: attachment` and `nosniff`. The file is served as written, never parsed, and a past day is not rebuilt from SQLite, which would no longer match what was written (promoted items move to a later day and the Backlog changes). A day whose file is missing is listed without links. A malformed day, a missing file and another user's day all return 404. The list is not in `/read`, so reading mode and TTS never meet it.
+- `/briefings` lists the user's days (from `briefing_days`, plus days with a summarized `runs` row from before that table existed), newest first. `/briefings/{day}` shows that day's stored file as plain text and `/briefings/{day}/download` sends it as `text/markdown` with `Content-Disposition: attachment` and `nosniff`. The file is served as written, never parsed, and a past day is not rebuilt from SQLite, which would no longer match what was written (promoted items move to a later day and the Backlog changes). A day whose file is missing is listed without links. A malformed day, a missing file and another user's day all return 404. The list is not in `/read`, so reading mode and TTS never meet it.
 
 ---
 
@@ -444,6 +445,8 @@ highlight_cache  user_id, highlight_id, bookmark_id, shown_on   -- PK(user_id, h
 old_bookmark_cache user_id, bookmark_id, bookmark_created_at, pulled_on  -- PK(user_id, bookmark_id)
                  -- old unarchived Karakeep bookmarks not yet in Siftstr;
                  -- pulled_on = the local day it was brought into the Backlog
+briefing_days    user_id, day, written_at  -- PK(user_id, day)
+                 -- the days that have a briefing file; deleted after 6 months
 highlight_picks  user_id, day, highlight_id, text, note, color, bookmark_title,
                  bookmark_url, karakeep_url, byline, created_at  -- PK(user_id, day)
                  -- the day's highlight, copied so a rewritten briefing reads the same

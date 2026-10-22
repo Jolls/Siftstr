@@ -224,9 +224,19 @@ func (s *Service) Write(ctx context.Context, userID, day string, final bool) err
 	if err != nil {
 		return err
 	}
+	return s.store(ctx, userID, day, b)
+}
+
+// store writes b as day's file and records the day. A file whose text would not
+// change is left alone, so a sync client sees no churn.
+func (s *Service) store(ctx context.Context, userID, day string, b Briefing) error {
 	p, err := s.path(ctx, userID, day)
 	if err != nil {
 		return err
+	}
+	text := b.Markdown()
+	if old, err := os.ReadFile(p); err == nil && string(old) == text {
+		return s.recordDay(ctx, userID, day)
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
@@ -236,7 +246,7 @@ func (s *Service) Write(ctx context.Context, userID, day string, final bool) err
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(b.Markdown()); err != nil {
+	if _, err := tmp.WriteString(text); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -246,13 +256,58 @@ func (s *Service) Write(ctx context.Context, userID, day string, final bool) err
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), p)
+	if err := os.Rename(tmp.Name(), p); err != nil {
+		return err
+	}
+	return s.recordDay(ctx, userID, day)
 }
 
-// Days lists the days userID has a summarized run for, newest first.
+// recordDay notes that userID has a briefing file for day.
+func (s *Service) recordDay(ctx context.Context, userID, day string) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO briefing_days (user_id, day, written_at) VALUES (?, ?, ?)
+		ON CONFLICT(user_id, day) DO UPDATE SET written_at = excluded.written_at`,
+		userID, day, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// daysQuery selects every day userID has a briefing for: a day written to a
+// file, or a day with a summarized run (which includes days from before the
+// file list was recorded). Callers add conditions on the day and an ORDER BY.
+const daysQuery = `SELECT day FROM (
+	SELECT day FROM briefing_days WHERE user_id = ?1
+	UNION
+	SELECT day FROM runs WHERE user_id = ?1 AND summaries_at IS NOT NULL AND day != ''
+) WHERE 1 = 1`
+
+// Daily is the briefing timer's step for userID, whose local date is today. It
+// closes the days before yesterday, then keeps today's live file current, so a
+// briefing exists with or without a Claude run. Yesterday is left to the
+// morning run, which closes it after carryover; this only closes it a day
+// late if no run does.
+//
+// Nothing is written for a day with no entries, backlog or highlight.
+func (s *Service) Daily(ctx context.Context, userID, today string) error {
+	t, err := time.Parse("2006-01-02", today)
+	if err != nil {
+		return fmt.Errorf("bad day %q", today)
+	}
+	// A day that cannot be closed must not stop today's file.
+	closeErr := s.Finalize(ctx, userID, t.AddDate(0, 0, -1).Format("2006-01-02"))
+	b, err := s.Build(ctx, userID, today, false)
+	if err != nil {
+		return err
+	}
+	if b.Highlight != nil || len(b.Today) > 0 || len(b.Backlog) > 0 {
+		if err := s.store(ctx, userID, today, b); err != nil {
+			return err
+		}
+	}
+	return closeErr
+}
+
+// Days lists the days userID has a briefing for, newest first.
 func (s *Service) Days(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT day FROM runs
-		WHERE user_id = ? AND summaries_at IS NOT NULL AND day != '' ORDER BY day DESC`, userID)
+	rows, err := s.DB.QueryContext(ctx, daysQuery+` ORDER BY day DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -304,8 +359,7 @@ func (s *Service) Finalize(ctx context.Context, userID, today string) error {
 	if err != nil {
 		return err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT day FROM runs
-		WHERE user_id = ? AND summaries_at IS NOT NULL AND day != '' AND day > ? AND day < ? ORDER BY day`, userID, last, today)
+	rows, err := s.DB.QueryContext(ctx, daysQuery+` AND day > ?2 AND day < ?3 ORDER BY day`, userID, last, today)
 	if err != nil {
 		return err
 	}
