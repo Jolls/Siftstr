@@ -18,6 +18,8 @@ import (
 	"github.com/Jolls/Siftstr/internal/auth"
 	"github.com/Jolls/Siftstr/internal/briefing"
 	"github.com/Jolls/Siftstr/internal/connections"
+	kk "github.com/Jolls/Siftstr/internal/dest/karakeep"
+	"github.com/Jolls/Siftstr/internal/highlights"
 	"github.com/Jolls/Siftstr/internal/outbox"
 	"github.com/Jolls/Siftstr/internal/runs"
 	"github.com/Jolls/Siftstr/internal/sources"
@@ -63,6 +65,8 @@ type Deps struct {
 	Dest    *writeback.Settings // where kept videos and podcasts go
 	// Briefing builds /read and writes the daily markdown files.
 	Briefing *briefing.Service
+	// HighlightColors changes the color of the day's highlight pick.
+	HighlightColors *highlights.Colors
 	// Outbox backs the Activity page and the alert for stopped entries.
 	Outbox *outbox.Log
 	// SecureCookies sets the Secure flag and turns on the HSTS header. It comes
@@ -129,6 +133,7 @@ func New(d Deps) (http.Handler, error) {
 	mux.HandleFunc("GET /briefings/{day}", s.protected(s.briefingView))
 	mux.HandleFunc("GET /briefings/{day}/download", s.protected(s.briefingDownload))
 	mux.HandleFunc("POST /sync/actions", s.protected(s.syncActions))
+	mux.HandleFunc("POST /highlight/color", s.protected(s.highlightColor))
 	mux.HandleFunc("GET /settings", s.protected(s.settingsHome))
 	mux.HandleFunc("GET /settings/sources", s.protected(s.sourcesForm))
 	mux.HandleFunc("POST /settings/ingest", s.protected(s.ingestSave))
@@ -288,6 +293,15 @@ func badge(state string, promoted bool) string {
 	return ""
 }
 
+// highlightColorOptions are the buttons of the highlight's color form: Karakeep's colors, in order.
+var highlightColorOptions = func() []ui.HighlightColor {
+	var out []ui.HighlightColor
+	for _, c := range kk.HighlightColors {
+		out = append(out, ui.HighlightColor{Value: c, Label: kk.HighlightColorLabel(c)})
+	}
+	return out
+}()
+
 // itemsPage renders one list of cards: today's, or the carried-over backlog.
 func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter, *http.Request, *session) {
 	return func(w http.ResponseWriter, req *http.Request, sess *session) {
@@ -308,6 +322,7 @@ func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter
 				serverError(w)
 				return
 			}
+			p.HighlightColors = highlightColorOptions
 		}
 		if p.PhoneFlow, err = s.Triage.PhoneFlow(ctx, sess.User.ID); err != nil {
 			serverError(w)
@@ -315,7 +330,7 @@ func (s *server) itemsPage(list, heading, empty string) func(http.ResponseWriter
 		}
 		for _, c := range cards {
 			p.Items = append(p.Items, ui.Item{
-				ID: c.ID, Title: c.Title, URL: c.URL, Source: c.Source, MediaType: c.MediaType,
+				ID: c.ID, Title: c.Title, URL: c.URL, KarakeepURL: c.KarakeepURL, Source: c.Source, MediaType: c.MediaType,
 				Excerpt: c.Excerpt, Summary: c.Summary, State: c.State, Promoted: c.Promoted,
 				Badge: badge(c.State, c.Promoted), CanPromote: c.CanPromote,
 				Kind: c.Kind, UndoID: c.UndoID,
@@ -470,7 +485,7 @@ func limitForms(next http.Handler) http.Handler {
 		case req.Method != http.MethodPost:
 		case req.URL.Path == "/login":
 			limit = maxLoginBody
-		case req.URL.Path == "/logout" || strings.HasPrefix(req.URL.Path, "/settings/"):
+		case req.URL.Path == "/logout" || req.URL.Path == "/highlight/color" || strings.HasPrefix(req.URL.Path, "/settings/"):
 			limit = maxFormBody
 		}
 		if limit > 0 {

@@ -4,14 +4,24 @@
   {{if .Items}}<small class="more" data-more aria-hidden="true"></small>{{end}}
 </div>
 {{/*
-  The day's Karakeep highlight. Not an item: no controls, no data-item-id, and
-  outside .items, so gestures and keys never reach it.
+  The day's Karakeep highlight. Not an item: no data-item-id, and outside
+  .items, so gestures and keys never reach it. Its one control is the color
+  form, a plain post that is not a triage action.
 */}}
-{{with .Highlight}}<aside class="highlight" aria-label="Highlight">
+{{with .Highlight}}<aside class="highlight"{{with .ColorKey}} data-color="{{.}}"{{end}} aria-label="Highlight">
   <h2>Highlight</h2>
   <blockquote>{{.Text}}</blockquote>
   {{if .Note}}<p>Note: {{.Note}}</p>{{end}}
-  {{if or .Title .Byline}}<p><small>From {{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}</a>{{else if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}{{if and .Title .Byline}}, {{.Byline}}{{end}}{{if .KarakeepURL}} · <a href="{{.KarakeepURL}}" rel="noopener noreferrer">Karakeep</a>{{end}}</small></p>{{end}}
+  {{if or .Title .Byline}}<p><small>From {{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}</a>{{else if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}{{if and .Title .Byline}}, {{.Byline}}{{end}}{{if .HasOriginal}} · <a class="original" href="{{.URL}}" rel="noopener noreferrer">Original</a>{{end}}</small></p>{{end}}
+  {{$col := .ColorKey}}{{$hid := .ID}}
+  {{with .ColorLabel}}<p><small>Color: <span class="highlight-color-name">{{.}}</span></small></p>{{end}}
+  <form method="post" action="/highlight/color" class="highlight-colors">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="highlight_id" value="{{$hid}}">
+    <fieldset role="group" aria-label="Change highlight color">
+      {{range $.HighlightColors}}<button type="submit" name="color" value="{{.Value}}" class="outline secondary"{{if eq .Value $col}} aria-pressed="true"{{end}}>{{.Label}}</button>{{end}}
+    </fieldset>
+  </form>
 </aside>{{end}}
 {{if .Items}}
 <section class="items" data-flow="{{.PhoneFlow}}" aria-label="{{.Heading}}">
@@ -33,8 +43,8 @@
 {{define "item"}}
 <article class="item" id="{{.ID}}" data-item-id="{{.ID}}" data-subject-type="{{if .Kind}}{{.Kind}}{{else}}item{{end}}" data-state="{{.State}}" data-promoted="{{.Promoted}}" data-media-type="{{.MediaType}}" data-can-promote="{{.CanPromote}}" data-undo-action="{{.UndoID}}" tabindex="0">
   <hgroup>
-    <h2>{{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h2>
-    <p>{{.Source}}</p>
+    <h2>{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h2>
+    <p>{{.Source}}{{if .HasOriginal}} · <small><a class="original" href="{{.URL}}" rel="noopener noreferrer">Original</a></small>{{end}}</p>
   </hgroup>
   {{if .Summary}}<p class="summary">{{.Summary}}</p>{{else if .Excerpt}}<p class="excerpt">{{.Excerpt}}</p>{{end}}
   <footer class="controls" aria-label="Triage actions">

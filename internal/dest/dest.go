@@ -37,6 +37,10 @@ type Item struct {
 	// filled in when the entry is sent, from what Siftstr has recorded for the
 	// item, since the bookmark may have been created after the entry was queued.
 	BookmarkID string `json:"bookmark_id,omitempty"`
+
+	// HighlightID and HighlightColor are for VerbHighlightColor.
+	HighlightID    string `json:"highlight_id,omitempty"`
+	HighlightColor string `json:"highlight_color,omitempty"`
 }
 
 // Karakeep verbs for Item.Verb.
@@ -46,6 +50,8 @@ const (
 	VerbUpdate  = "update"  // set archived and tags on the item's bookmark
 	VerbDelete  = "delete"  // delete the item's bookmark
 	VerbSummary = "summary" // overwrite the item's bookmark summary
+
+	VerbHighlightColor = "highlight_color" // set the color of one Karakeep highlight (not a bookmark verb)
 )
 
 // NeedsBookmark reports whether the verb works on an existing bookmark.

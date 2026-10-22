@@ -79,6 +79,14 @@ func (s *Sender) Handle(ctx context.Context, e outbox.Entry) error {
 	if err != nil {
 		return err
 	}
+	if item.Verb == dest.VerbDelete && s.DB != nil && item.BookmarkID != "" {
+		// The bookmark is gone, so the item has none: a link to it would lead
+		// nowhere. Matching the ID leaves a newer bookmark alone.
+		if _, err := s.DB.ExecContext(ctx, `UPDATE items SET karakeep_id = NULL WHERE user_id = ? AND id = ? AND karakeep_id = ?`,
+			e.UserID, item.ID, item.BookmarkID); err != nil {
+			return fmt.Errorf("clear bookmark: %w", err)
+		}
+	}
 	if r, ok := d.(dest.BookmarkReporter); ok && s.DB != nil && r.BookmarkID() != "" && (item.Verb == dest.VerbSave || item.Verb == dest.VerbCreate) {
 		// A failure here returns an error, so the whole entry is sent again,
 		// which is safe: a save sets a desired state.
@@ -95,6 +103,21 @@ func (s *Sender) Handle(ctx context.Context, e outbox.Entry) error {
 // reports skip when there is nothing left to do.
 func (s *Sender) prepareKarakeep(ctx context.Context, e outbox.Entry, item *dest.Item) (skip bool, err error) {
 	if s.DB == nil {
+		return false, nil
+	}
+	if item.Verb == dest.VerbHighlightColor {
+		// The pick's color now, not the one the entry was queued with, so two quick
+		// changes end with the latest even when the first send had to be retried.
+		var color string
+		err := s.DB.QueryRowContext(ctx, `SELECT color FROM highlight_picks WHERE user_id = ? AND highlight_id = ? ORDER BY day DESC LIMIT 1`,
+			e.UserID, item.HighlightID).Scan(&color)
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil // the pick is gone: nothing to send
+		}
+		if err != nil {
+			return false, err
+		}
+		item.HighlightColor = color
 		return false, nil
 	}
 	var state, bookmark string

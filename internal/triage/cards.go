@@ -3,6 +3,8 @@ package triage
 import (
 	"context"
 	"fmt"
+
+	"github.com/Jolls/Siftstr/internal/connections"
 )
 
 // Which list a page shows.
@@ -15,17 +17,20 @@ const (
 // in for its entries. Actioned cards stay in the list so they can show a
 // badge and be undone (ARCHITECTURE.md section 3).
 type Card struct {
-	Kind       string // SubjectItem or SubjectDigest
-	ID         string
-	Title      string
-	URL        string
-	Source     string
-	MediaType  string
-	Excerpt    string // what a card is triaged on until it has a summary
-	Summary    string
-	State      string
-	Promoted   bool // the item has been promoted (and not undone), so an archive is a real Karakeep archive
-	CanPromote bool
+	Kind  string // SubjectItem or SubjectDigest
+	ID    string
+	Title string
+	URL   string
+	// KarakeepURL is the item's Karakeep bookmark; empty when it has none or the
+	// user has no Karakeep connection.
+	KarakeepURL string
+	Source      string
+	MediaType   string
+	Excerpt     string // what a card is triaged on until it has a summary
+	Summary     string
+	State       string
+	Promoted    bool // the item has been promoted (and not undone), so an archive is a real Karakeep archive
+	CanPromote  bool
 	// UndoID is the held action that put the card in its state, or empty when
 	// nothing can be undone any more.
 	UndoID string
@@ -54,9 +59,13 @@ func (s *Service) Cards(ctx context.Context, userID, list, today string) ([]Card
 		return alias + `.batch_date < ? AND (` + alias + `.state IN ('light', 'deep') OR held != '')`
 	}
 
+	kkBase, err := connections.KarakeepBaseURL(ctx, s.DB, userID)
+	if err != nil {
+		return nil, err
+	}
 	itemQ := fmt.Sprintf(`SELECT i.id, i.title, i.url, COALESCE(NULLIF(i.byline, ''), s.name), i.media_type, i.state,
 		i.excerpt, COALESCE(NULLIF(i.deep_summary, ''), i.light_summary, ''), i.promoted_at IS NOT NULL, s.max_depth,
-		COALESCE(`+heldAction+`, '') AS held
+		COALESCE(`+heldAction+`, '') AS held, COALESCE(i.karakeep_id, '')
 		FROM items i JOIN sources s ON s.user_id = i.user_id AND s.id = i.source_id
 		WHERE i.user_id = ? AND i.digest_id IS NULL AND `+where("i")+`
 		ORDER BY COALESCE(i.published_at, i.created_at) DESC, i.id`, "i", SubjectItem)
@@ -67,11 +76,12 @@ func (s *Service) Cards(ctx context.Context, userID, list, today string) ([]Card
 	var cards []Card
 	for rows.Next() {
 		c := Card{Kind: SubjectItem}
-		var maxDepth string
-		if err := rows.Scan(&c.ID, &c.Title, &c.URL, &c.Source, &c.MediaType, &c.State, &c.Excerpt, &c.Summary, &c.Promoted, &maxDepth, &c.UndoID); err != nil {
+		var maxDepth, kkID string
+		if err := rows.Scan(&c.ID, &c.Title, &c.URL, &c.Source, &c.MediaType, &c.State, &c.Excerpt, &c.Summary, &c.Promoted, &maxDepth, &c.UndoID, &kkID); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		c.KarakeepURL = connections.BookmarkURL(kkBase, kkID)
 		// Promote asks for a deeper summary once, and only where the source
 		// supports one. On a deep card it acts as keep.
 		c.CanPromote = c.State == "deep" || (!c.Promoted && maxDepth == "deep")

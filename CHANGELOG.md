@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.13] - 2026-10-21
+### Added
+- The day's Karakeep highlight now shows its color: a left border in that color on Today and `/read`, and the color's name (such as "Yellow") on Today and in the briefing file. On Today, four small buttons change the color; the new color is saved at once and sent to Karakeep. A highlight with no color, or one Karakeep adds later, shows no mark ([#55](https://github.com/Jolls/Siftstr/issues/55))
+
+### Changed
+- Item titles on Today and Backlog, on `/read` and in the briefing file now link to the item's Karakeep bookmark when it has one, with a smaller `Original` link to the source beside it. Items without a bookmark still link to the original. The highlight's `From` link now goes to Karakeep, followed by an `Original` link ([#56](https://github.com/Jolls/Siftstr/issues/56))
+
 ## [0.2.12] - 2026-10-21
 ### Fixed
 - Daily briefings no longer depend on the Claude run. A timer now writes each day's briefing file (and closes earlier days) whether or not summaries were submitted, so **Briefings** lists every day for users whose summaries all come from Karakeep ([#53](https://github.com/Jolls/Siftstr/issues/53))

@@ -3,6 +3,7 @@ package ui
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -62,8 +63,10 @@ type Page struct {
 	// The /read page.
 	Day       string
 	Highlight *briefing.Highlight // the day's Karakeep highlight, shown first under Today
-	Today     []briefing.Entry
-	Backlog   []briefing.Entry
+	// HighlightColors are the colors the highlight's control offers on /today.
+	HighlightColors []HighlightColor
+	Today           []briefing.Entry
+	Backlog         []briefing.Entry
 }
 
 // BriefingDay is one row of /briefings.
@@ -184,21 +187,33 @@ type User struct {
 // AccentOption is one radio on /settings/appearance.
 type AccentOption struct{ Value, Label string }
 
+// Link is where the card's title goes: its Karakeep bookmark when it has one,
+// else the original.
+func (i Item) Link() string { return cmp.Or(i.KarakeepURL, i.URL) }
+
+// HasOriginal reports whether the original gets its own link beside a title
+// that goes to Karakeep.
+func (i Item) HasOriginal() bool { return i.KarakeepURL != "" && i.URL != "" }
+
+// HighlightColor is one button of the highlight's color control.
+type HighlightColor struct{ Value, Label string }
+
 // Item is one triage card.
 type Item struct {
-	ID         string
-	Title      string
-	URL        string
-	Source     string
-	MediaType  string
-	Excerpt    string // shown until the card has a summary
-	Summary    string
-	State      string // item state, see ARCHITECTURE.md §5
-	Promoted   bool   // has been promoted, so swipe left archives instead of deleting
-	Badge      string // "deleted", "archived", "promoted", "kept", or empty
-	CanPromote bool
-	Kind       string // "item" or "digest": the subject type actions use
-	UndoID     string // the held action that can still be undone, if any
+	ID          string
+	Title       string
+	URL         string
+	KarakeepURL string
+	Source      string
+	MediaType   string
+	Excerpt     string // shown until the card has a summary
+	Summary     string
+	State       string // item state, see ARCHITECTURE.md §5
+	Promoted    bool   // has been promoted, so swipe left archives instead of deleting
+	Badge       string // "deleted", "archived", "promoted", "kept", or empty
+	CanPromote  bool
+	Kind        string // "item" or "digest": the subject type actions use
+	UndoID      string // the held action that can still be undone, if any
 }
 
 // Renderer holds the parsed page templates.

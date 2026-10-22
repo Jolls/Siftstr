@@ -9,6 +9,7 @@
 .item { margin: 0; touch-action: pan-y; } /* vertical scroll is the browser's; horizontal swipes are ours */
 .item h2 { font-size: 1.15rem; margin-bottom: 0.25rem; }
 .item hgroup p { font-size: 0.85rem; }
+.item hgroup .original { font-size: 0.8em; }
 /* Buttons read left to right as the keys do: archive (left), keep (centre/space), promote (right). */
 .item .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: center; }
 .item .controls button { margin: 0; width: auto; }
@@ -18,6 +19,15 @@
 .read-highlight blockquote, .highlight blockquote { white-space: pre-line; }
 .highlight h2 { font-size: 1.15rem; margin-bottom: 0.25rem; }
 .highlight blockquote { margin: 0.5rem 0; }
+/* The highlight's left border takes Karakeep's color (the --highlight-* values in the first :root block below). The border sits outside the text flow. */
+.highlight[data-color], .read-highlight[data-color] { border-left: 0.3rem solid var(--highlight-border); padding-left: 1rem; }
+.highlight[data-color="yellow"], .read-highlight[data-color="yellow"] { --highlight-border: var(--highlight-yellow); }
+.highlight[data-color="red"], .read-highlight[data-color="red"] { --highlight-border: var(--highlight-red); }
+.highlight[data-color="green"], .read-highlight[data-color="green"] { --highlight-border: var(--highlight-green); }
+.highlight[data-color="blue"], .read-highlight[data-color="blue"] { --highlight-border: var(--highlight-blue); }
+.highlight-colors fieldset { margin: 0; }
+.highlight-colors button { margin: 0; width: auto; padding: 0.25rem 0.75rem; font-size: 0.85rem; }
+.highlight-colors button[aria-pressed="true"] { font-weight: 700; }
 
 /* Swipe left deletes, except on a promoted card, where it archives the bookmark. */
 .item .label-archive, .item[data-promoted="true"] .label-delete, .item[data-state="deep"] .label-delete { display: none; }
@@ -35,8 +45,10 @@
 .item[data-state="archived"] .controls, .item[data-state="kept"] .controls, .item[data-state="pending_deep"] .controls { justify-content: space-between; }
 .item[data-state="archived"] [data-action="undo"], .item[data-state="kept"] [data-action="undo"], .item[data-state="pending_deep"] [data-action="undo"] { margin-inline-start: auto; }
 
-/* Status badge colors: fixed per status, not the accent. Light values, then dark by OS preference or forced theme. */
+/* Status badge colors: fixed per status, not the accent. Light values, then dark by OS preference or forced theme.
+   The highlight border colors are fixed too, each at least 3:1 against white and the dark background. */
 :root {
+  --highlight-yellow: #c28200; --highlight-red: #dc2626; --highlight-green: #16a34a; --highlight-blue: #2563eb;
   --badge-deleted-bg: #b91c1c; --badge-deleted-fg: #ffffff;
   --badge-archived-bg: #6b7280; --badge-archived-fg: #ffffff;
   --badge-promoted-bg: #bbf7d0; --badge-promoted-fg: #14532d;

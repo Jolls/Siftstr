@@ -296,3 +296,28 @@ func (s *Service) Secret(ctx context.Context, userID, id string) (string, error)
 	}
 	return s.open(userID, id, blob)
 }
+
+// BookmarkURL is a Karakeep bookmark's page in the user's Karakeep. It is
+// empty when there is no bookmark ID or no base URL.
+func BookmarkURL(baseURL, bookmarkID string) string {
+	if bookmarkID == "" || strings.TrimSpace(baseURL) == "" {
+		return ""
+	}
+	return strings.TrimRight(baseURL, "/") + "/dashboard/preview/" + url.PathEscape(bookmarkID)
+}
+
+// KarakeepBaseURL returns userID's Karakeep connection base URL, or "" when
+// the user has none. q is a *sql.DB or *sql.Tx.
+func KarakeepBaseURL(ctx context.Context, q interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}, userID string) (string, error) {
+	var base string
+	err := q.QueryRowContext(ctx, `SELECT base_url FROM connections WHERE user_id = ? AND kind = 'karakeep' ORDER BY id LIMIT 1`, userID).Scan(&base)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read karakeep connection: %w", err)
+	}
+	return base, nil
+}

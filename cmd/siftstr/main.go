@@ -156,7 +156,7 @@ func serve() error {
 	}
 	sched := scheduler.New(enabledUsers(st), nil)
 	h, err := server.New(server.Deps{
-		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies, CheckConnection: dest.CheckFunc(factories), Kick: kicker(sched),
+		Ready: st.Ping, Auth: a, Conns: conns, Sources: sources.New(st.DB()), Runs: rn, Triage: tr, Dest: &writeback.Settings{DB: st.DB()}, Outbox: &outbox.Log{DB: st.DB()}, Briefing: briefing.New(st.DB(), filepath.Join(cfg.DataDir, "briefings")), HighlightColors: &highlights.Colors{DB: st.DB(), Now: time.Now}, SecureCookies: cfg.SecureCookies(), TrustedProxies: cfg.TrustedProxies, CheckConnection: dest.CheckFunc(factories), Kick: kicker(sched),
 	})
 	if err != nil {
 		return err

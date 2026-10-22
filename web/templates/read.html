@@ -6,11 +6,11 @@
 */}}
 <section aria-labelledby="read-today">
   <h2 id="read-today">Today</h2>
-  {{with .Highlight}}<article class="read-entry read-highlight">
+  {{with .Highlight}}<article class="read-entry read-highlight"{{with .ColorKey}} data-color="{{.}}"{{end}}>
     <h3>Highlight</h3>
     <blockquote>{{.Text}}</blockquote>
     {{if .Note}}<p>Note: {{.Note}}</p>{{end}}
-    {{if or .Title .Byline}}<p>From {{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}</a>{{else if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}{{if and .Title .Byline}}, {{.Byline}}{{end}}{{if .KarakeepURL}} · <a href="{{.KarakeepURL}}" rel="noopener noreferrer">Karakeep</a>{{end}}</p>{{end}}
+    {{if or .Title .Byline}}<p>From {{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}</a>{{else if .Title}}{{.Title}}{{else}}{{.Byline}}{{end}}{{if and .Title .Byline}}, {{.Byline}}{{end}}{{if .HasOriginal}} · <a href="{{.URL}}" rel="noopener noreferrer">Original</a>{{end}}</p>{{end}}
   </article>{{end}}
   {{range .Today}}{{template "readentry" .}}{{else}}<p>Nothing arrived today.</p>{{end}}
 </section>
@@ -22,8 +22,8 @@
 
 {{define "readentry"}}
 <article class="read-entry">
-  <h3>{{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h3>
-  <p>{{.Source}}{{if .MediaType}}, {{.MediaType}}{{end}}{{if .Outcome}}, {{.Outcome}}{{end}}</p>
+  <h3>{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h3>
+  <p>{{.Source}}{{if .MediaType}}, {{.MediaType}}{{end}}{{if .Outcome}}, {{.Outcome}}{{end}}{{if .HasOriginal}}, <a href="{{.URL}}" rel="noopener noreferrer">Original</a>{{end}}</p>
   {{if .Summary}}<p class="summary">{{.Summary}}</p>{{else if .Excerpt}}<p class="excerpt">{{.Excerpt}}</p>{{end}}
 </article>
 {{end}}
