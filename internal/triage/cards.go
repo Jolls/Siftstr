@@ -56,7 +56,7 @@ func (s *Service) Cards(ctx context.Context, userID, list, today string) ([]Card
 		if list == ListToday {
 			return alias + `.batch_date = ? AND ` + alias + `.state IN ` + visible
 		}
-		return alias + `.batch_date < ? AND (` + alias + `.state IN ('light', 'deep') OR held != '')`
+		return alias + `.batch_date < ? AND (` + alias + `.state IN ('light', 'deep', 'pending_deep') OR held != '')`
 	}
 
 	kkBase, err := connections.KarakeepBaseURL(ctx, s.DB, userID)
