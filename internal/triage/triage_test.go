@@ -496,6 +496,7 @@ func TestCardsTodayAndBacklog(t *testing.T) {
 	mk("today_deep", "src1", "deep", "2026-10-09")
 	mk("old_light", "src1", "light", "2026-10-08")
 	mk("old_pending", "src1", "pending_light", "2026-10-08")
+	mk("old_pending_deep", "src1", "pending_deep", "2026-10-08")
 	mk("today_waiting", "src1", "pending_light", "2026-10-09")
 	mk("today_expired", "src1", "expired", "2026-10-09")
 	f.item(t, "child", "u1", "src3", "light", "dig1")
@@ -526,7 +527,7 @@ func TestCardsTodayAndBacklog(t *testing.T) {
 	}
 
 	back := f.cardIDs(t, "u1", ListBacklog)
-	if len(back) != 1 || back["old_light"].ID == "" {
+	if len(back) != 2 || back["old_light"].ID == "" || back["old_pending_deep"].ID == "" {
 		t.Errorf("backlog: %v", back)
 	}
 	if len(f.cardIDs(t, "u2", ListBacklog)) != 0 {
