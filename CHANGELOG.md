@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.14] - 2026-10-30
+### Fixed
+- A promoted item whose summary hasn't arrived yet now stays on Backlog after its day passes, as it already did on `/read` and in the briefing ([#59](https://github.com/Jolls/Siftstr/issues/59))
+
 ## [0.2.13] - 2026-10-21
 ### Added
 - The day's Karakeep highlight now shows its color: a left border in that color on Today and `/read`, and the color's name (such as "Yellow") on Today and in the briefing file. On Today, four small buttons change the color; the new color is saved at once and sent to Karakeep. A highlight with no color, or one Karakeep adds later, shows no mark ([#55](https://github.com/Jolls/Siftstr/issues/55))
